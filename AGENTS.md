@@ -33,6 +33,11 @@
 
 ## Docs
 
+- Usage buckets are disjoint. Native thread totals have no model attribution:
+  emit `codex:unattributed`, never the UI model. Keep the accounting accumulator
+  on SessionState across prompt handlers and context-window fill resets; emitted
+  delta is already included in modelUsage. Resume continuity is not yet durable.
+
 - ACP v1 prompt completion follows native Goal continuations across turn boundaries. Keep
   the prompt and interaction handlers open until the goal stops and its last native turn
   drains, or the turn fails/is cancelled. Never issue another `turn/start` after a routed
