@@ -18,6 +18,7 @@ import type {Model, ReviewStartResponse, ThreadGoal, TurnCompletedNotification, 
 import type {RateLimitsMap} from "../../RateLimitsMap";
 import {ModelId} from "../../ModelId";
 import {ACP_EXT_SESSION_RATE_LIMITS_METHOD, GOAL_CONTROL_METHOD} from "../../AcpExtensions";
+import {CodexAcpClient} from "../../CodexAcpClient";
 
 describe('ACP server test', { timeout: 40_000 }, () => {
 
@@ -356,6 +357,26 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []});
         expect(newSessionResponse.sessionId).toBeDefined();
+    });
+
+    it('does not require ChatGPT authentication for the configured API-key provider', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const appServerClient = mockFixture.getCodexAppServerClient();
+        const accountRead = vi.spyOn(appServerClient, "accountRead");
+        const client = new CodexAcpClient(appServerClient, {
+            model_provider: "company-proxy",
+            model_providers: {
+                "company-proxy": {
+                    base_url: "https://proxy.example.com/v1",
+                    env_key: "COMPANY_PROXY_API_KEY",
+                    wire_api: "responses",
+                    requires_openai_auth: false,
+                },
+            },
+        });
+
+        await expect(client.authRequired()).resolves.toBe(false);
+        expect(accountRead).not.toHaveBeenCalled();
     });
 
     it('should show account in /status for api key auth and hide it for gateway auth', async () => {

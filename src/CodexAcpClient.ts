@@ -351,6 +351,16 @@ export class CodexAcpClient {
             return false;
         }
 
+        const providerId = this.modelProvider ??
+            (typeof this.config["model_provider"] === "string" ? this.config["model_provider"] : null);
+        const providers = this.config["model_providers"];
+        if (providerId && isJsonObject(providers)) {
+            const provider = providers[providerId];
+            if (isJsonObject(provider) && provider["requires_openai_auth"] === false) {
+                return false;
+            }
+        }
+
         const response = await this.codexClient.accountRead({refreshToken: false})
         return response.requiresOpenaiAuth && !response.account;
     }

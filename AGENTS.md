@@ -64,6 +64,9 @@
   session opens, merge sparse `account/rateLimits/updated` values into that snapshot, and preserve
   each native window's `windowDurationMins` when mapping it to Core's
   `windowDurationSeconds`. Never infer 5-hour/7-day meaning from `primary`/`secondary` position.
+- Authentication is provider-scoped. When the selected startup model provider explicitly sets
+  `requires_openai_auth = false`, session creation must not inspect, start, replace, or clear the
+  machine's ChatGPT account; provider credentials come from that configuration instead.
 - Core `worktreeProject` maps to native project APIs, never trust configuration or
   writable roots. Preserve existing project assignments on load/resume; assign only
   the child on fork. Project protocol fields omitted by stable generation live in
