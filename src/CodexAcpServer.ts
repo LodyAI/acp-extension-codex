@@ -1653,7 +1653,11 @@ export class CodexAcpServer {
                 throw error;
             }
             logger.error(`Steering request for session ${params.sessionId} failed`, error);
-            return {outcome: "failed"};
+            // `failed` is a delivery verdict: callers may safely replay it as
+            // an ordinary prompt. An unexpected adapter failure cannot prove
+            // whether app-server accepted the steer, so preserve that
+            // ambiguity by rejecting the request instead.
+            throw error;
         } finally {
             if (queue.isIdle && this.steeringQueues.get(params.sessionId) === queue) {
                 this.steeringQueues.delete(params.sessionId);
