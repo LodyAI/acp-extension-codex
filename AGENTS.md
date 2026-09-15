@@ -34,9 +34,12 @@
 ## Docs
 
 - Usage buckets are disjoint. Native thread totals have no model attribution:
-  emit `codex:unattributed`, never the UI model. Keep the accounting accumulator
-  on SessionState across prompt handlers and context-window fill resets; emitted
-  delta is already included in modelUsage. Resume continuity is not yet durable.
+  keep any total not covered by `rawResponse/completed` in `codex:unattributed`,
+  never the UI model. Attribute exact per-response events to the resolved thread/turn
+  model and preserve a small `$CODEX_HOME` sidecar across restarts. Keep the accounting
+  accumulator on SessionState across prompt handlers and context-window fill resets;
+  emitted delta is already included in modelUsage. Forked sessions must exclude source
+  history from their own totals.
 
 - Manual `/compact` owns the native turn reported by `turn/started` until matching
   `turn/completed`. Cancel sends `turn/interrupt`; a pre-start cancellation waits for

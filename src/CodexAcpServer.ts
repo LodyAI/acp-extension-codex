@@ -37,6 +37,7 @@ import type {
 } from "./app-server/v2";
 import type {RateLimitsMap} from "./RateLimitsMap";
 import {ModelId} from "./ModelId";
+import {createCodexUsageAccounting} from "./CodexUsageAccounting";
 import {AgentMode, MODE_CONFIG_ID} from "./AgentMode";
 import {
     LODY_PLAN_MODE_CONFIG_ID,
@@ -779,6 +780,17 @@ export class CodexAcpServer {
             ),
             asyncTasks: this.createAsyncTasks(sessionId),
         };
+        const usageAccounting = createCodexUsageAccounting({
+            threadId: sessionId,
+            codexHome: this.codexAcpClient.getHomePath(),
+            forkFromHistory: operation.kind === "fork",
+        });
+        try {
+            usageAccounting.noteThreadModel(sessionId, ModelId.fromString(currentModelId).model);
+        } catch {
+            // The model id is optional telemetry; never fail session open for it.
+        }
+        sessionState.usageAccounting = usageAccounting;
         sessionState.titleGen = new TitleGenerator(
             this.codexAcpClient.appServerClient,
             sessionId,
@@ -2164,6 +2176,16 @@ export class CodexAcpServer {
             ),
             asyncTasks: this.createAsyncTasks(sessionId),
         };
+        const usageAccounting = createCodexUsageAccounting({
+            threadId: sessionId,
+            codexHome: this.codexAcpClient.getHomePath(),
+        });
+        try {
+            usageAccounting.noteThreadModel(sessionId, ModelId.fromString(currentModelId).model);
+        } catch {
+            // The model id is optional telemetry; never fail session load for it.
+        }
+        sessionState.usageAccounting = usageAccounting;
         sessionState.titleGen = new TitleGenerator(
             this.codexAcpClient.appServerClient,
             sessionId,
@@ -3286,6 +3308,7 @@ export class CodexAcpServer {
                     sessionState.additionalDirectories,
                     (turnId) => {
                         const turn = {threadId: params.sessionId, turnId};
+                        sessionState.usageAccounting?.noteTurnModel(turnId, modelId.model);
                         if (!goalLifecycle.startSubmittedTurn(turnId)) {
                             pendingTurnStart?.resolve(turnId);
                             onTurnStarted?.();
@@ -3398,6 +3421,7 @@ export class CodexAcpServer {
                             sessionState.additionalDirectories,
                             (turnId) => {
                                 const turn = {threadId: params.sessionId, turnId};
+                                sessionState.usageAccounting?.noteTurnModel(turnId, modelId.model);
                                 if (!goalLifecycle.startSubmittedTurn(turnId)) return;
                                 activePrompt.currentTurn = turn;
                                 if (this.promptShouldStop(params.sessionId, activePrompt)) {

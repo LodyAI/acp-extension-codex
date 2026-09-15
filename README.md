@@ -61,11 +61,14 @@ compaction lifecycle, and history reads. ACP-standard plans, elicitation, sessio
 forking, and context-window usage stay on their standard protocol paths.
 
 Accounting converts inclusive native counters into disjoint token buckets and
-preserves totals across context-window fill resets. Native thread usage has no
-per-model attribution, so `modelUsage` uses `codex:unattributed`; it must not be
-priced as the currently selected model. `delta` is already included in cumulative
-totals. The legacy top-level `usage` remains cumulative. Accounting state survives
-prompt handlers, not process restarts; durable resume accounting remains unresolved.
+preserves totals across context-window fill resets. Exact per-response usage from
+`rawResponse/completed` is attributed to the model that produced the response when
+the adapter can resolve it; unresolved or legacy totals remain in
+`codex:unattributed`. A sidecar under `$CODEX_HOME` restores the cumulative ledger
+after process restarts, and fork sessions exclude source history. Missing costs stay
+unknown. `delta` is already included in cumulative totals. The legacy top-level `usage`
+remains cumulative. Durable resume accounting is still bounded by that machine-local
+sidecar.
 
 Codex steering uses `_lody/session/steer` and confirms application with
 `_lody/session/steer_applied`. It keeps the active turn's model, mode, and

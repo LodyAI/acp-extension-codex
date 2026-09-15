@@ -48,6 +48,71 @@ describe('Token Usage Events', () => {
         expect(next.delta.usage.cacheCreationInputTokens).toBe(60);
         expect(next.modelUsage[CODEX_UNATTRIBUTED_MODEL].costUSD).toBeUndefined();
     });
+
+    it('attributes exact per-response usage to the active model', () => {
+        const ledger = new CodexUsageAccounting();
+        const raw = {totalTokens: 110, inputTokens: 100, cachedInputTokens: 40,
+            cacheWriteInputTokens: 60, outputTokens: 10, reasoningOutputTokens: 5};
+        ledger.noteTurnModel('turn-id', 'gpt-5.3-codex');
+        const response = ledger.recordResponse('s', {
+            threadId: 's',
+            turnId: 'turn-id',
+            responseId: 'response-1',
+            usage: raw,
+            usageMetadata: null,
+        });
+        expect(response).toBeDefined();
+        expect(response!.modelUsage['gpt-5.3-codex']).toEqual({
+            inputTokens: 0, outputTokens: 5, cacheReadInputTokens: 40,
+            cacheCreationInputTokens: 60, reasoningOutputTokens: 5,
+        });
+        expect(response!.modelUsage[CODEX_UNATTRIBUTED_MODEL]).toBeUndefined();
+
+        const update = ledger.update('s', {
+            threadId: 's',
+            turnId: 'turn-id',
+            tokenUsage: {total: raw, last: raw, modelContextWindow: 128000},
+        });
+        expect(update.modelUsage['gpt-5.3-codex']).toEqual({
+            inputTokens: 0, outputTokens: 5, cacheReadInputTokens: 40,
+            cacheCreationInputTokens: 60, reasoningOutputTokens: 5,
+        });
+        expect(update.modelUsage[CODEX_UNATTRIBUTED_MODEL]).toBeUndefined();
+    });
+
+    it('excludes fork source history and attributes only post-fork responses', () => {
+        const ledger = new CodexUsageAccounting({forkFromHistory: true});
+        const source = {totalTokens: 1000, inputTokens: 900, cachedInputTokens: 0,
+            cacheWriteInputTokens: 0, outputTokens: 100, reasoningOutputTokens: 0};
+        const fresh = {totalTokens: 110, inputTokens: 100, cachedInputTokens: 0,
+            cacheWriteInputTokens: 0, outputTokens: 10, reasoningOutputTokens: 0};
+        ledger.noteTurnModel('turn-id', 'gpt-5.3-codex');
+        ledger.recordResponse('s', {
+            threadId: 's',
+            turnId: 'turn-id',
+            responseId: 'response-1',
+            usage: fresh,
+            usageMetadata: null,
+        });
+        const total = {
+            totalTokens: source.totalTokens + fresh.totalTokens,
+            inputTokens: source.inputTokens + fresh.inputTokens,
+            cachedInputTokens: 0,
+            cacheWriteInputTokens: 0,
+            outputTokens: source.outputTokens + fresh.outputTokens,
+            reasoningOutputTokens: 0,
+        };
+        const update = ledger.update('s', {
+            threadId: 's',
+            turnId: 'turn-id',
+            tokenUsage: {total, last: fresh, modelContextWindow: 128000},
+        });
+        expect(update.modelUsage['gpt-5.3-codex']).toEqual({
+            inputTokens: 100, outputTokens: 10, cacheReadInputTokens: 0,
+            cacheCreationInputTokens: 0, reasoningOutputTokens: 0,
+        });
+        expect(update.modelUsage[CODEX_UNATTRIBUTED_MODEL]).toBeUndefined();
+    });
     let mockFixture: CodexMockTestFixture;
     const sessionId = 'test-session-id';
 
@@ -289,6 +354,58 @@ describe('Token Usage Events', () => {
                         } },
                     }),
                 ],
+            });
+        });
+
+        it('attributes raw response completions to the rerouted model', async () => {
+            const raw = {
+                totalTokens: 110,
+                inputTokens: 100,
+                cachedInputTokens: 40,
+                cacheWriteInputTokens: 60,
+                outputTokens: 10,
+                reasoningOutputTokens: 5,
+            };
+            const events = await setupPromptAndReturnEvents([
+                {
+                    method: 'model/rerouted',
+                    params: {
+                        threadId: sessionId,
+                        turnId: 'turn-id',
+                        fromModel: 'gpt-5.2-codex',
+                        toModel: 'gpt-5.3-codex',
+                        reason: 'highRiskCyberActivity',
+                    },
+                } as ServerNotification,
+                {
+                    method: 'rawResponse/completed',
+                    params: {
+                        threadId: sessionId,
+                        turnId: 'turn-id',
+                        responseId: 'response-1',
+                        usage: raw,
+                        usageMetadata: null,
+                    },
+                } as ServerNotification,
+            ])();
+
+            const usageEvent = events.find(
+                (event) =>
+                    event.method === 'notify' &&
+                    event.args[0] === ACP_EXT_SESSION_USAGE_UPDATE_METHOD &&
+                    typeof event.args[1] === 'object' &&
+                    event.args[1] !== null &&
+                    'modelUsage' in event.args[1]
+            );
+            expect(usageEvent).toBeDefined();
+            expect((usageEvent?.args[1] as { modelUsage?: Record<string, unknown> }).modelUsage).toEqual({
+                'gpt-5.3-codex': {
+                    inputTokens: 0,
+                    outputTokens: 5,
+                    cacheReadInputTokens: 40,
+                    cacheCreationInputTokens: 60,
+                    reasoningOutputTokens: 5,
+                },
             });
         });
 

@@ -46,7 +46,7 @@ import type {
 } from "./app-server/v2";
 import type { McpStartupCompleteEvent } from "./app-server/McpStartupCompleteEvent";
 import {toTokenCount} from "./TokenCount";
-import {CodexUsageAccounting} from "./CodexUsageAccounting";
+import {createCodexUsageAccounting} from "./CodexUsageAccounting";
 import {
     commandExecutionUsesTerminalOutput,
     createCommandExecutionUpdate,
@@ -598,6 +598,10 @@ export class CodexEventHandler {
                 this.completeRetryIncidentOnTurnProgress();
                 return this.createReasoningSectionBreakEvent(notification.params);
             case "model/rerouted":
+                this.sessionState.usageAccounting?.noteTurnModel(
+                    notification.params.turnId,
+                    notification.params.toModel
+                );
                 return this.createModelReroutedEvent(notification.params);
             case "fuzzyFileSearch/sessionUpdated":
                 return this.handleFuzzyFileSearchSessionUpdated(notification.params);
@@ -671,6 +675,22 @@ export class CodexEventHandler {
                     this.createSessionUsageExtNotification(notification.params)
                 );
                 return;
+            case "thread/settings/updated":
+                this.sessionState.usageAccounting?.noteThreadModel(
+                    notification.params.threadId,
+                    notification.params.threadSettings.model
+                );
+                return;
+            case "rawResponse/completed": {
+                const update = this.sessionState.usageAccounting?.recordResponse(
+                    this.sessionState.sessionId,
+                    notification.params
+                );
+                if (update) {
+                    await this.notifyExt(ACP_EXT_SESSION_USAGE_UPDATE_METHOD, update);
+                }
+                return;
+            }
             default:
                 return;
         }
@@ -682,7 +702,9 @@ export class CodexEventHandler {
     }
 
     private createSessionUsageExtNotification(params: ThreadTokenUsageUpdatedNotification): SessionUsageExtNotification {
-        this.sessionState.usageAccounting ??= new CodexUsageAccounting();
+        this.sessionState.usageAccounting ??= createCodexUsageAccounting({
+            threadId: this.sessionState.sessionId,
+        });
         return this.sessionState.usageAccounting.update(this.sessionState.sessionId, params);
     }
 
