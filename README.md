@@ -60,6 +60,13 @@ rate-limit query, acknowledged steering, goals, subagent/background-task lifecyc
 compaction lifecycle, and history reads. ACP-standard plans, elicitation, session
 forking, and context-window usage stay on their standard protocol paths.
 
+Accounting converts inclusive native counters into disjoint token buckets and
+preserves totals across context-window fill resets. Native thread usage has no
+per-model attribution, so `modelUsage` uses `codex:unattributed`; it must not be
+priced as the currently selected model. `delta` is already included in cumulative
+totals. The legacy top-level `usage` remains cumulative. Accounting state survives
+prompt handlers, not process restarts; durable resume accounting remains unresolved.
+
 Codex steering uses `_lody/session/steer` and confirms application with
 `_lody/session/steer_applied`. It keeps the active turn's model, mode, and
 configuration; slash commands cannot be steered.

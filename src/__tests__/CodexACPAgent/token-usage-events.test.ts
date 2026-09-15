@@ -3,6 +3,7 @@ import type { ServerNotification } from '../../app-server';
 import { createCodexMockTestFixture, createTestSessionState, type CodexMockTestFixture } from '../acp-test-utils';
 import type { TokenUsageBreakdown } from '../../app-server/v2';
 import { ACP_EXT_SESSION_USAGE_UPDATE_METHOD } from '../../AcpExtensions';
+import { CodexUsageAccounting, CODEX_UNATTRIBUTED_MODEL } from '../../CodexUsageAccounting';
 
 function createTokenUsageNotification(
     sessionId: string,
@@ -23,6 +24,30 @@ function createTokenUsageNotification(
 }
 
 describe('Token Usage Events', () => {
+    it('keeps disjoint totals and delta across duplicates, model switches and native resets', () => {
+        const ledger = new CodexUsageAccounting();
+        const raw = {totalTokens: 110, inputTokens: 100, cachedInputTokens: 40,
+            cacheWriteInputTokens: 60, outputTokens: 10, reasoningOutputTokens: 5};
+        const send = (total: TokenUsageBreakdown, last = total) => ledger.update('s', {
+            threadId: 's', turnId: 't', tokenUsage: {total, last, modelContextWindow: 128000},
+        });
+        const first = send(raw);
+        expect(first.modelUsage[CODEX_UNATTRIBUTED_MODEL]).toEqual({
+            inputTokens: 0, outputTokens: 5, cacheReadInputTokens: 40,
+            cacheCreationInputTokens: 60, reasoningOutputTokens: 5,
+        });
+        expect(Object.values(first.delta.usage).reduce((a, b) => a + b, 0)).toBe(110);
+        first.modelUsage[CODEX_UNATTRIBUTED_MODEL].inputTokens = 999;
+        expect(send(raw).delta.usage.inputTokens).toBe(0);
+        const reset = {totalTokens: 128000, inputTokens: 0, cachedInputTokens: 0,
+            cacheWriteInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0};
+        expect(send(reset).modelUsage[CODEX_UNATTRIBUTED_MODEL].cacheCreationInputTokens).toBe(60);
+        send(reset);
+        const next = send(raw);
+        expect(next.modelUsage[CODEX_UNATTRIBUTED_MODEL].cacheCreationInputTokens).toBe(120);
+        expect(next.delta.usage.cacheCreationInputTokens).toBe(60);
+        expect(next.modelUsage[CODEX_UNATTRIBUTED_MODEL].costUSD).toBeUndefined();
+    });
     let mockFixture: CodexMockTestFixture;
     const sessionId = 'test-session-id';
 
@@ -248,16 +273,21 @@ describe('Token Usage Events', () => {
                 method: 'notify',
                 args: [
                     ACP_EXT_SESSION_USAGE_UPDATE_METHOD,
-                    {
+                    expect.objectContaining({
                         sessionId,
                         usage: {
-                            inputTokens: 4000,
-                            outputTokens: 900,
+                            inputTokens: 3000,
+                            outputTokens: 800,
                             cacheReadInputTokens: 1000,
+                            cacheCreationInputTokens: 0,
                             reasoningOutputTokens: 100,
                             contextWindow: 128000,
                         },
-                    },
+                        modelUsage: { [CODEX_UNATTRIBUTED_MODEL]: {
+                            inputTokens: 3000, outputTokens: 800, cacheReadInputTokens: 1000,
+                            cacheCreationInputTokens: 0, reasoningOutputTokens: 100,
+                        } },
+                    }),
                 ],
             });
         });
@@ -299,15 +329,16 @@ describe('Token Usage Events', () => {
                 method: 'notify',
                 args: [
                     ACP_EXT_SESSION_USAGE_UPDATE_METHOD,
-                    {
+                    expect.objectContaining({
                         sessionId,
                         usage: {
-                            inputTokens: 4000,
-                            outputTokens: 900,
+                            inputTokens: 3000,
+                            outputTokens: 800,
                             cacheReadInputTokens: 1000,
+                            cacheCreationInputTokens: 0,
                             reasoningOutputTokens: 100,
                         },
-                    },
+                    }),
                 ],
             });
         });

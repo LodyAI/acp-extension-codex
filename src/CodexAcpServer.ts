@@ -160,6 +160,7 @@ import {
 
 
 export interface SessionState {
+    usageAccounting?: import("./CodexUsageAccounting").CodexUsageAccounting;
     sessionId: string,
     currentModelId: string,
     availableModels: Array<Model>,

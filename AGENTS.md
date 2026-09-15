@@ -33,6 +33,11 @@
 
 ## Docs
 
+- Usage buckets are disjoint. Native thread totals have no model attribution:
+  emit `codex:unattributed`, never the UI model. Keep the accounting accumulator
+  on SessionState across prompt handlers and context-window fill resets; emitted
+  delta is already included in modelUsage. Resume continuity is not yet durable.
+
 - Manual `/compact` owns the native turn reported by `turn/started` until matching
   `turn/completed`. Cancel sends `turn/interrupt`; a pre-start cancellation waits for
   the turn id and interrupts it on arrival. Never release the prompt on the compact
