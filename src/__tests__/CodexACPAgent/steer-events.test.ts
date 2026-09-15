@@ -167,7 +167,7 @@ describe('_lody/session/steer', () => {
         expect(turnSteerSpy).not.toHaveBeenCalled();
     });
 
-    it('reports failed instead of throwing when steering hits an unexpected error', async () => {
+    it('does not report a replay-safe failure for an unknown steering error', async () => {
         const mockFixture = createCodexMockTestFixture();
         vi.spyOn(mockFixture.getCodexAcpAgent(), "getSessionState").mockImplementation(() => {
             throw new Error("unexpected boom");
@@ -177,7 +177,7 @@ describe('_lody/session/steer', () => {
             sessionId: "session-id",
             prompt: [{type: "text", text: "keep the agent alive"}],
             steerId: "steer-error",
-        })).resolves.toEqual({outcome: "failed"});
+        })).rejects.toThrow("unexpected boom");
     });
 
     it('rejects malformed steer params', async () => {
