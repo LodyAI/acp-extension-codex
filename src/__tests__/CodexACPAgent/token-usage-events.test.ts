@@ -63,6 +63,27 @@ describe('Token Usage Events', () => {
         expect(ledger.update('s', snapshot(10)).usage.inputTokens).toBe(10);
     });
 
+    it('starts a fresh lifetime at the resume baseline when the sidecar is missing', () => {
+        const options = {threadId: 's', codexHome: home()};
+        const ledger = new CodexUsageAccounting({...options, usageBaseline: snapshot(1000)});
+        expect(ledger.update('s', snapshot(1110)).usage.inputTokens).toBe(110);
+        expect(ledger.update('s', snapshot(1110)).modelUsage[CODEX_UNATTRIBUTED_MODEL]?.inputTokens)
+            .toBe(110);
+        expect(new CodexUsageAccounting(options).update('s', snapshot(1120)).usage.inputTokens).toBe(120);
+    });
+
+    it('does not re-emit a resumed history baseline when exact attribution already has a ledger', () => {
+        const options = {threadId: 's', codexHome: home()};
+        const ledger = new CodexUsageAccounting(options);
+        ledger.noteThreadModel('s', 'model-a');
+        ledger.recordResponse('s', {...rawResponse(1000, 'history'), usage: native(1000)});
+        const resumed = new CodexUsageAccounting({...options, usageBaseline: snapshot(1000)});
+        const update = resumed.update('s', snapshot(1110));
+        expect(update.usage.inputTokens).toBe(1110);
+        expect(update.modelUsage['model-a']?.inputTokens).toBe(1000);
+        expect(update.modelUsage[CODEX_UNATTRIBUTED_MODEL]?.inputTokens).toBe(110);
+    });
+
     it.each(['before', 'at', 'after'])('restores the native cursor when restarting %s reset', (position) => {
         const options = {threadId: 's', codexHome: home()};
         let ledger = new CodexUsageAccounting(options);

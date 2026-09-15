@@ -104,7 +104,11 @@ export type CodexUsageAccountingOptions = {
     codexHome?: string | null;
     /** True when this ACP session is a new Codex fork; exclude source history. */
     forkFromHistory?: boolean;
-    /** Restored native snapshot captured before the first new turn. */
+    /**
+     * Native snapshot captured before the first new turn. It restores the
+     * cursor for a ledger-backed thread and supplies the fresh baseline for a
+     * resumed thread whose sidecar is missing.
+     */
     usageBaseline?: ThreadTokenUsageUpdatedNotification;
 };
 
@@ -177,6 +181,14 @@ export class CodexUsageAccounting {
             addInto(retainedTotal, this.excludedTotal);
             this.offset = subtract(retainedTotal, normalizeCodexUsage(options.usageBaseline.tokenUsage.total));
             this.threadTotal = retainedTotal;
+        }
+        if (!restored && !options.forkFromHistory && options.usageBaseline) {
+            // A resumed thread with no local ledger starts a fresh accounting
+            // lifetime at the captured native baseline. Report only later
+            // increments so history already persisted under older model keys is
+            // not re-emitted under codex:unattributed.
+            this.excludedTotal = normalizeCodexUsage(options.usageBaseline.tokenUsage.total);
+            this.threadTotal = cloneUsage(this.excludedTotal);
         }
         if (options.usageBaseline) this.update(options.threadId ?? options.usageBaseline.threadId, options.usageBaseline);
         // Persist even an idle fork, before it can be closed and resumed.

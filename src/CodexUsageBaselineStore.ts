@@ -6,7 +6,10 @@ export type PersistedCodexUsageAccounting = {
     version: 1;
     /** Cumulative model attribution for this Codex thread. */
     modelUsage: Record<string, ModelUsage>;
-    /** Fork source history that must never be counted as this thread's usage. */
+    /**
+     * History before this accounting lifetime: fork source history or the
+     * captured native baseline of a resumed thread without a sidecar.
+     */
     excludedTotal?: ModelUsage;
     /** A fork has not yet observed the first thread total to compute excludedTotal. */
     pendingForkExclusion?: boolean;

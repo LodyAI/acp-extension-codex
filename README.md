@@ -65,7 +65,10 @@ preserves totals across context-window fill resets. Exact per-response usage fro
 `rawResponse/completed` is attributed to the model that produced the response when
 the adapter can resolve it; unresolved or legacy totals remain in
 `codex:unattributed`. A sidecar under `$CODEX_HOME` restores the cumulative ledger
-after process restarts, and fork sessions exclude source history. Missing costs stay
+after process restarts, and fork sessions exclude source history. If the sidecar
+is missing for a resumed thread, the adapter starts a fresh accounting lifetime
+at the captured native baseline and reports only later increments; it does not
+re-emit already persisted history under a new model key. Missing costs stay
 unknown. `delta` is already included in cumulative totals. The legacy top-level `usage`
 remains cumulative. The sidecar also stores the native reset cursor; forks capture
 the replayed history total before their first turn. Durable resume accounting is

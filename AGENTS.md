@@ -39,7 +39,8 @@
   model and preserve a small `$CODEX_HOME` sidecar across restarts. Keep the accounting
   accumulator on SessionState across prompt handlers and context-window fill resets;
   emitted delta is already included in modelUsage. Forked sessions must exclude source
-  history from their own totals.
+  history from their own totals. A resumed thread without a sidecar starts a fresh
+  lifetime at the captured native baseline and reports later increments only.
   Enable `thread/start.experimentalRawEvents`; pinned cold resume/fork cannot opt in
   and retain unattributed totals. Capture fork replay before `thread/started`, never
   infer source history from a paid response. Persist the native reset cursor with the
