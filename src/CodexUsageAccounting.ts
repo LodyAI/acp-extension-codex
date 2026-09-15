@@ -225,8 +225,8 @@ export class CodexUsageAccounting {
 
     private resolveModel(threadId: string, turnId: string): string {
         return (
-            this.turnModels.get(turnId)?.trim() ??
-            this.threadModels.get(threadId)?.trim() ??
+            this.turnModels.get(turnId) ??
+            this.threadModels.get(threadId) ??
             CODEX_UNATTRIBUTED_MODEL
         );
     }
@@ -272,7 +272,3 @@ export class CodexUsageAccounting {
         }
     }
 }
-
-export const createCodexUsageAccounting = (
-    options: CodexUsageAccountingOptions
-): CodexUsageAccounting => new CodexUsageAccounting(options);

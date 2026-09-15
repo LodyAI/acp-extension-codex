@@ -37,7 +37,7 @@ import type {
 } from "./app-server/v2";
 import type {RateLimitsMap} from "./RateLimitsMap";
 import {ModelId} from "./ModelId";
-import {createCodexUsageAccounting} from "./CodexUsageAccounting";
+import {CodexUsageAccounting} from "./CodexUsageAccounting";
 import {AgentMode, MODE_CONFIG_ID} from "./AgentMode";
 import {
     LODY_PLAN_MODE_CONFIG_ID,
@@ -780,7 +780,7 @@ export class CodexAcpServer {
             ),
             asyncTasks: this.createAsyncTasks(sessionId),
         };
-        const usageAccounting = createCodexUsageAccounting({
+        const usageAccounting = new CodexUsageAccounting({
             threadId: sessionId,
             codexHome: this.codexAcpClient.getHomePath(),
             forkFromHistory: operation.kind === "fork",
@@ -2176,7 +2176,7 @@ export class CodexAcpServer {
             ),
             asyncTasks: this.createAsyncTasks(sessionId),
         };
-        const usageAccounting = createCodexUsageAccounting({
+        const usageAccounting = new CodexUsageAccounting({
             threadId: sessionId,
             codexHome: this.codexAcpClient.getHomePath(),
         });

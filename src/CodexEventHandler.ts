@@ -46,7 +46,7 @@ import type {
 } from "./app-server/v2";
 import type { McpStartupCompleteEvent } from "./app-server/McpStartupCompleteEvent";
 import {toTokenCount} from "./TokenCount";
-import {createCodexUsageAccounting} from "./CodexUsageAccounting";
+import {CodexUsageAccounting} from "./CodexUsageAccounting";
 import {
     commandExecutionUsesTerminalOutput,
     createCommandExecutionUpdate,
@@ -702,7 +702,7 @@ export class CodexEventHandler {
     }
 
     private createSessionUsageExtNotification(params: ThreadTokenUsageUpdatedNotification): SessionUsageExtNotification {
-        this.sessionState.usageAccounting ??= createCodexUsageAccounting({
+        this.sessionState.usageAccounting ??= new CodexUsageAccounting({
             threadId: this.sessionState.sessionId,
         });
         return this.sessionState.usageAccounting.update(this.sessionState.sessionId, params);
