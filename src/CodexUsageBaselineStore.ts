@@ -10,6 +10,12 @@ export type PersistedCodexUsageAccounting = {
     excludedTotal?: ModelUsage;
     /** A fork has not yet observed the first thread total to compute excludedTotal. */
     pendingForkExclusion?: boolean;
+    /** Native reset state is one cursor; never merge its fields independently. */
+    cursor?: {
+        offset: ModelUsage; threadTotal: ModelUsage; atReset: boolean;
+        pendingRootResponses?: ModelUsage;
+        subagentUsage?: ModelUsage;
+    };
 };
 
 export interface CodexUsageStore {
@@ -79,23 +85,34 @@ const mergeModelUsage = (
 };
 
 const parsePersisted = (value: unknown): PersistedCodexUsageAccounting | null => {
-    if (!isRecord(value) || value.version !== 1) return null;
-    const modelUsage = readModelUsage(value.modelUsage);
+    if (!isRecord(value) || value['version'] !== 1) return null;
+    const modelUsage = readModelUsage(value['modelUsage']);
     if (!modelUsage) return null;
     const excludedTotal =
-        value.excludedTotal === undefined
+        value['excludedTotal'] === undefined
             ? undefined
-            : (readUsage(value.excludedTotal) ?? undefined);
+            : (readUsage(value['excludedTotal']) ?? undefined);
+    let cursor: PersistedCodexUsageAccounting["cursor"];
+    const rawCursor = value['cursor'];
+    if (isRecord(rawCursor)) {
+        const offset = readUsage(rawCursor['offset']);
+        const threadTotal = readUsage(rawCursor['threadTotal']);
+        if (offset && threadTotal && typeof rawCursor['atReset'] === "boolean") {
+            cursor = {offset, threadTotal, atReset: rawCursor['atReset']};
+            const pendingRootResponses = readUsage(rawCursor['pendingRootResponses']);
+            const subagentUsage = readUsage(rawCursor['subagentUsage']);
+            if (pendingRootResponses) cursor.pendingRootResponses = pendingRootResponses;
+            if (subagentUsage) cursor.subagentUsage = subagentUsage;
+        }
+    }
     return {
         version: 1,
         modelUsage,
-        excludedTotal,
-        pendingForkExclusion:
-            value.pendingForkExclusion === true
-                ? true
-                : value.pendingForkExclusion === false
-                  ? false
-                  : undefined,
+        ...(excludedTotal && {excludedTotal}),
+        ...(cursor && {cursor}),
+        ...(typeof value['pendingForkExclusion'] === 'boolean' && {
+            pendingForkExclusion: value['pendingForkExclusion'],
+        }),
     };
 };
 
@@ -117,10 +134,10 @@ class FileCodexUsageStore implements CodexUsageStore {
         fs.writeFileSync(temporaryPath, JSON.stringify(merged), "utf8");
         try {
             fs.renameSync(temporaryPath, this.filePath);
-        } catch {
-            // Windows cannot replace an existing destination in one rename.
-            fs.rmSync(this.filePath, { force: true });
-            fs.renameSync(temporaryPath, this.filePath);
+        } catch (error) {
+            // A failed replacement must preserve the last complete baseline.
+            fs.rmSync(temporaryPath, { force: true });
+            throw error;
         }
     }
 
@@ -132,11 +149,13 @@ class FileCodexUsageStore implements CodexUsageStore {
             existing.excludedTotal && state.excludedTotal
                 ? mergeUsage(existing.excludedTotal, state.excludedTotal)
                 : (state.excludedTotal ?? existing.excludedTotal);
+        const pendingForkExclusion = state.pendingForkExclusion ?? existing.pendingForkExclusion;
         return {
             version: 1,
             modelUsage,
-            excludedTotal,
-            pendingForkExclusion: state.pendingForkExclusion ?? existing.pendingForkExclusion,
+            ...(excludedTotal && {excludedTotal}),
+            ...(pendingForkExclusion !== undefined && {pendingForkExclusion}),
+            ...(state.cursor && {cursor: state.cursor}),
         };
     }
 }

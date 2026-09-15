@@ -598,10 +598,6 @@ export class CodexEventHandler {
                 this.completeRetryIncidentOnTurnProgress();
                 return this.createReasoningSectionBreakEvent(notification.params);
             case "model/rerouted":
-                this.sessionState.usageAccounting?.noteTurnModel(
-                    notification.params.turnId,
-                    notification.params.toModel
-                );
                 return this.createModelReroutedEvent(notification.params);
             case "fuzzyFileSearch/sessionUpdated":
                 return this.handleFuzzyFileSearchSessionUpdated(notification.params);
@@ -669,6 +665,24 @@ export class CodexEventHandler {
 
     private async emitExtNotification(notification: ServerNotification): Promise<void> {
         switch (notification.method) {
+            case "turn/completed":
+                this.sessionState.usageAccounting?.setCompacting(notification.params.threadId, false);
+                return;
+            case "item/started":
+            case "item/completed":
+                if (notification.params.item.type === "contextCompaction") {
+                    this.sessionState.usageAccounting?.setCompacting(
+                        notification.params.threadId,
+                        notification.method === "item/started",
+                    );
+                }
+                return;
+            case "model/rerouted":
+                this.sessionState.usageAccounting?.noteReroutedModel(
+                    notification.params.turnId,
+                    notification.params.toModel,
+                );
+                return;
             case "thread/tokenUsage/updated":
                 await this.notifyExt(
                     ACP_EXT_SESSION_USAGE_UPDATE_METHOD,

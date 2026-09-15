@@ -784,6 +784,7 @@ export class CodexAcpServer {
             threadId: sessionId,
             codexHome: this.codexAcpClient.getHomePath(),
             forkFromHistory: operation.kind === "fork",
+            ...(sessionMetadata.usageBaseline && {usageBaseline: sessionMetadata.usageBaseline}),
         });
         try {
             usageAccounting.noteThreadModel(sessionId, ModelId.fromString(currentModelId).model);
@@ -2179,6 +2180,7 @@ export class CodexAcpServer {
         const usageAccounting = new CodexUsageAccounting({
             threadId: sessionId,
             codexHome: this.codexAcpClient.getHomePath(),
+            ...(sessionMetadata.usageBaseline && {usageBaseline: sessionMetadata.usageBaseline}),
         });
         try {
             usageAccounting.noteThreadModel(sessionId, ModelId.fromString(currentModelId).model);

@@ -559,6 +559,7 @@ export class CodexAcpClient {
         await this.worktreeProjects.assign(response.thread, project, true);
         const codexModels = await this.fetchAvailableModels();
         const currentModelId = this.createModelId(codexModels, response.model, response.reasoningEffort).toString();
+        const usageBaseline = this.codexClient.getThreadTokenUsage(response.thread.id);
         return {
             sessionId: request.sessionId,
             currentModelId: currentModelId,
@@ -567,6 +568,7 @@ export class CodexAcpClient {
             modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
             additionalDirectories,
+            ...(usageBaseline ? {usageBaseline} : {}),
         }
     }
 
@@ -605,6 +607,7 @@ export class CodexAcpClient {
         });
         const codexModels = await this.fetchAvailableModels();
         const currentModelId = this.createModelId(codexModels, response.model, response.reasoningEffort).toString();
+        const usageBaseline = this.codexClient.getThreadTokenUsage(response.thread.id);
         return {
             sessionId: request.sessionId,
             currentModelId: currentModelId,
@@ -614,6 +617,7 @@ export class CodexAcpClient {
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
             thread: historyResponse.thread,
             additionalDirectories,
+            ...(usageBaseline ? {usageBaseline} : {}),
         };
     }
 
@@ -632,6 +636,7 @@ export class CodexAcpClient {
         const projectId = await this.worktreeProjects.resolve(project);
         const response = await this.codexClient.threadStart({
             ...(projectId ? {projectId} : {}),
+            experimentalRawEvents: true,
             config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers),
             modelProvider: this.getModelProvider(),
             cwd: request.cwd,

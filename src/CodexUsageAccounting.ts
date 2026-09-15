@@ -96,6 +96,7 @@ const isZero = (usage: ModelUsage): boolean => !hasCounters(usage);
 
 export type CodexUsageUpdate = SessionUsageUpdate & {
     delta: NonNullable<SessionUsageUpdate["delta"]>;
+    modelUsage: NonNullable<SessionUsageUpdate["modelUsage"]>;
 };
 
 export type CodexUsageAccountingOptions = {
@@ -103,6 +104,8 @@ export type CodexUsageAccountingOptions = {
     codexHome?: string | null;
     /** True when this ACP session is a new Codex fork; exclude source history. */
     forkFromHistory?: boolean;
+    /** Restored native snapshot captured before the first new turn. */
+    usageBaseline?: ThreadTokenUsageUpdatedNotification;
 };
 
 /** One instance per active SessionState, never per prompt handler.
@@ -120,15 +123,18 @@ export class CodexUsageAccounting {
     private readonly store: CodexUsageStore | null;
     private modelUsage: Record<string, ModelUsage>;
     private excludedTotal: ModelUsage;
-    private seedForkExclusion: boolean;
 
     private offset = empty();
     private threadTotal = empty();
     private atReset = false;
+    private pendingRootResponses = empty();
+    private subagentUsage = empty();
     private modelContextWindow: number | null = null;
 
     private readonly threadModels = new Map<string, string>();
     private readonly turnModels = new Map<string, string>();
+    private readonly compactingThreads = new Set<string>();
+    private readonly reroutedTurns = new Set<string>();
     private readonly responseIds = new Set<string>();
     private readonly responseIdOrder: string[] = [];
     private lastEmittedModelUsage: Record<string, ModelUsage> | null = null;
@@ -141,12 +147,40 @@ export class CodexUsageAccounting {
             this.excludedTotal = restored.excludedTotal
                 ? cloneUsage(restored.excludedTotal)
                 : empty();
-            this.seedForkExclusion = restored.pendingForkExclusion === true;
+            if (restored.cursor) {
+                this.offset = cloneUsage(restored.cursor.offset);
+                this.threadTotal = cloneUsage(restored.cursor.threadTotal);
+                this.atReset = restored.cursor.atReset;
+                this.pendingRootResponses = cloneUsage(restored.cursor.pendingRootResponses ?? empty());
+                this.subagentUsage = cloneUsage(restored.cursor.subagentUsage ?? empty());
+            }
         } else {
             this.modelUsage = {};
             this.excludedTotal = empty();
-            this.seedForkExclusion = options.forkFromHistory === true;
         }
+        if (options.forkFromHistory || restored?.pendingForkExclusion) {
+            // Fork replay precedes thread/started. Its captured total is source
+            // history; never infer this from the first paid response's total.
+            const baseline = options.usageBaseline
+                ? normalizeCodexUsage(options.usageBaseline.tokenUsage.total)
+                : empty();
+            // The old pending format could already contain exact child usage.
+            this.excludedTotal = restored?.pendingForkExclusion
+                ? subtract(baseline, sumModelUsage(this.modelUsage))
+                : baseline;
+            this.threadTotal = cloneUsage(this.excludedTotal);
+        }
+        if (restored && !restored.cursor && options.usageBaseline) {
+            // V1 before native cursors: anchor the retained cumulative ledger
+            // to the replayed counter so post-upgrade increments are not lost.
+            const retainedTotal = sumModelUsage(this.modelUsage);
+            addInto(retainedTotal, this.excludedTotal);
+            this.offset = subtract(retainedTotal, normalizeCodexUsage(options.usageBaseline.tokenUsage.total));
+            this.threadTotal = retainedTotal;
+        }
+        if (options.usageBaseline) this.update(options.threadId ?? options.usageBaseline.threadId, options.usageBaseline);
+        // Persist even an idle fork, before it can be closed and resumed.
+        this.persist();
     }
 
     noteThreadModel(threadId: string, model: string | null | undefined): void {
@@ -159,24 +193,45 @@ export class CodexUsageAccounting {
         if (normalized) this.turnModels.set(turnId, normalized);
     }
 
+    setCompacting(threadId: string, compacting: boolean): void {
+        if (compacting) this.compactingThreads.add(threadId);
+        else this.compactingThreads.delete(threadId);
+    }
+
+    noteReroutedModel(turnId: string, model: string): void {
+        if (this.reroutedTurns.has(turnId)) return;
+        this.noteTurnModel(turnId, model);
+        this.reroutedTurns.add(turnId);
+    }
+
     /** Exact usage from one upstream Responses API completion. */
     recordResponse(
         sessionId: string,
         params: RawResponseCompletedNotification
     ): CodexUsageUpdate | undefined {
+        if (!this.rememberResponse(params.responseId)) return undefined;
+        const model = this.resolveModel(params.threadId, params.turnId);
+        // Native reports only the first mismatch in a turn. That evidence
+        // describes this completion, not every later response in the turn.
+        if (this.reroutedTurns.has(params.turnId)) {
+            this.turnModels.set(params.turnId, CODEX_UNATTRIBUTED_MODEL);
+        }
         if (!params.usage) return undefined;
         const normalized = normalizeCodexUsage(params.usage);
         if (isZero(normalized)) return undefined;
-        if (!this.rememberResponse(params.responseId)) return undefined;
-        const model = this.resolveModel(params.threadId, params.turnId);
         const target = this.modelUsage[model] ?? empty();
         addInto(target, normalized);
         this.modelUsage[model] = target;
+        if (params.threadId === sessionId) addInto(this.pendingRootResponses, normalized);
+        else addInto(this.subagentUsage, normalized);
         this.persist();
         return this.buildUpdate(sessionId);
     }
 
     update(sessionId: string, params: ThreadTokenUsageUpdatedNotification): CodexUsageUpdate {
+        // Child totals include inherited context and have independent reset
+        // epochs. Only their exact responses belong in this session's ledger.
+        if (params.threadId !== sessionId) return this.buildUpdate(sessionId);
         const { total: raw, modelContextWindow } = params.tokenUsage;
         // rust-v0.153.4 TokenUsageInfo::fill_to_context_window emits this explicit
         // sentinel. An ordinary zero-token or cache-only update is not compaction.
@@ -189,7 +244,12 @@ export class CodexUsageAccounting {
             raw.cachedInputTokens === 0 &&
             raw.cacheWriteInputTokens === 0 &&
             raw.reasoningOutputTokens === 0;
-        if (reset && !this.atReset) this.offset = { ...this.threadTotal };
+        if (reset) {
+            if (!this.atReset) this.offset = { ...this.threadTotal };
+            // A crash can leave raw persisted while its native total was still
+            // queued. A replayed reset must retain that already billed work.
+            addInto(this.offset, this.pendingRootResponses);
+        }
         this.atReset = reset;
 
         const normalized = normalizeCodexUsage(raw);
@@ -201,18 +261,13 @@ export class CodexUsageAccounting {
                 (this.offset[key] ?? 0) + (normalized[key] ?? 0)
             );
         }
+        this.pendingRootResponses = subtract(this.pendingRootResponses, subtract(next, this.threadTotal));
         this.threadTotal = next;
         if (modelContextWindow !== null) this.modelContextWindow = modelContextWindow;
 
-        if (this.seedForkExclusion) {
-            // A fork reports source history in its thread total. Treat the first
-            // total outside already observed post-fork responses as excluded.
-            this.excludedTotal = subtract(this.threadTotal, sumModelUsage(this.modelUsage));
-            this.seedForkExclusion = false;
-        }
-
         const accounted = subtract(this.threadTotal, this.excludedTotal);
-        const residual = subtract(accounted, sumModelUsage(this.modelUsage));
+        const rootAccounted = subtract(sumModelUsage(this.modelUsage), this.subagentUsage);
+        const residual = subtract(accounted, rootAccounted);
         if (!isZero(residual)) {
             const target = this.modelUsage[CODEX_UNATTRIBUTED_MODEL] ?? empty();
             addInto(target, residual);
@@ -224,6 +279,9 @@ export class CodexUsageAccounting {
     }
 
     private resolveModel(threadId: string, turnId: string): string {
+        // Compaction can run on the previous model or a native fallback while
+        // retaining this turn's id. The event carries no producing model.
+        if (this.compactingThreads.has(threadId)) return CODEX_UNATTRIBUTED_MODEL;
         return (
             this.turnModels.get(turnId) ??
             this.threadModels.get(threadId) ??
@@ -262,9 +320,16 @@ export class CodexUsageAccounting {
         const state: PersistedCodexUsageAccounting = {
             version: 1,
             modelUsage: cloneModelUsage(this.modelUsage),
+            cursor: {
+                offset: cloneUsage(this.offset),
+                threadTotal: cloneUsage(this.threadTotal),
+                atReset: this.atReset,
+                pendingRootResponses: cloneUsage(this.pendingRootResponses),
+                subagentUsage: cloneUsage(this.subagentUsage),
+            },
         };
         if (!isZero(this.excludedTotal)) state.excludedTotal = cloneUsage(this.excludedTotal);
-        state.pendingForkExclusion = this.seedForkExclusion;
+        state.pendingForkExclusion = false;
         try {
             this.store.save(state);
         } catch (error) {

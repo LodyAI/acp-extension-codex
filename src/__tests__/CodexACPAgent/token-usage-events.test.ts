@@ -4,6 +4,17 @@ import { createCodexMockTestFixture, createTestSessionState, type CodexMockTestF
 import type { TokenUsageBreakdown } from '../../app-server/v2';
 import { ACP_EXT_SESSION_USAGE_UPDATE_METHOD } from '../../AcpExtensions';
 import { CodexUsageAccounting, CODEX_UNATTRIBUTED_MODEL } from '../../CodexUsageAccounting';
+import {mkdtempSync, rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {afterEach} from 'vitest';
+import {createCodexUsageStore} from '../../CodexUsageBaselineStore';
+import {renameSync} from 'node:fs';
+
+vi.mock('node:fs', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('node:fs')>();
+    return {...actual, renameSync: vi.fn(actual.renameSync)};
+});
 
 function createTokenUsageNotification(
     sessionId: string,
@@ -24,6 +35,146 @@ function createTokenUsageNotification(
 }
 
 describe('Token Usage Events', () => {
+    const homes: string[] = [];
+    const home = () => {
+        const directory = mkdtempSync(join(tmpdir(), 'codex-usage-test-'));
+        homes.push(directory);
+        return directory;
+    };
+    afterEach(() => { for (const directory of homes.splice(0)) rmSync(directory, {recursive: true, force: true}); });
+    const native = (input: number): TokenUsageBreakdown => ({totalTokens: input, inputTokens: input,
+        cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0});
+    const snapshot = (input: number) => ({threadId: 's', turnId: 't',
+        tokenUsage: {total: native(input), last: native(input), modelContextWindow: 128000}});
+    const rawResponse = (input: number, responseId: string) => ({threadId: 's', turnId: 't', responseId,
+        usage: native(input), usageMetadata: null});
+
+    it('excludes fork replay before the first paid response, including an idle restart', () => {
+        const options = {threadId: 's', codexHome: home()};
+        new CodexUsageAccounting({...options, forkFromHistory: true, usageBaseline: snapshot(1000)});
+        const resumed = new CodexUsageAccounting(options);
+        expect(resumed.update('s', snapshot(1000)).usage.inputTokens).toBe(0);
+        expect(resumed.update('s', snapshot(1110)).usage.inputTokens).toBe(110);
+        expect(new CodexUsageAccounting(options).update('s', snapshot(1120)).usage.inputTokens).toBe(120);
+    });
+
+    it('counts the first native-only response of an empty fork', () => {
+        const ledger = new CodexUsageAccounting({forkFromHistory: true});
+        expect(ledger.update('s', snapshot(10)).usage.inputTokens).toBe(10);
+    });
+
+    it.each(['before', 'at', 'after'])('restores the native cursor when restarting %s reset', (position) => {
+        const options = {threadId: 's', codexHome: home()};
+        let ledger = new CodexUsageAccounting(options);
+        ledger.update('s', snapshot(1000));
+        if (position === 'before') ledger = new CodexUsageAccounting(options);
+        const reset = snapshot(0);
+        reset.tokenUsage.total.totalTokens = 128000;
+        ledger.update('s', reset);
+        if (position === 'at') ledger = new CodexUsageAccounting(options);
+        ledger.update('s', reset);
+        expect(ledger.update('s', snapshot(10)).usage.inputTokens).toBe(1010);
+        if (position === 'after') ledger = new CodexUsageAccounting(options);
+        expect(ledger.update('s', snapshot(20)).usage.inputTokens).toBe(1020);
+    });
+
+    it('does not count a persisted exact response twice when its native total arrives after restart', () => {
+        const options = {threadId: 's', codexHome: home()};
+        const ledger = new CodexUsageAccounting(options);
+        ledger.noteTurnModel('t', 'model-a');
+        ledger.recordResponse('s', rawResponse(100, 'r'));
+        const restored = new CodexUsageAccounting(options).update('s', snapshot(100));
+        expect(restored.usage.inputTokens).toBe(100);
+        expect(restored.modelUsage[CODEX_UNATTRIBUTED_MODEL]).toBeUndefined();
+    });
+
+    it('migrates a pre-cursor sidecar after native reset', () => {
+        const options = {threadId: 's', codexHome: home()};
+        createCodexUsageStore(options.codexHome, 's')!.save({version: 1, modelUsage: {
+            [CODEX_UNATTRIBUTED_MODEL]: {inputTokens: 1010, outputTokens: 0, cacheReadInputTokens: 0,
+                cacheCreationInputTokens: 0, reasoningOutputTokens: 0},
+        }});
+        const ledger = new CodexUsageAccounting({...options, usageBaseline: snapshot(10)});
+        expect(ledger.update('s', snapshot(20)).usage.inputTokens).toBe(1020);
+        expect(new CodexUsageAccounting(options).update('s', snapshot(30)).usage.inputTokens).toBe(1030);
+    });
+
+    it.each([false, true])('retains a persisted raw response when restart replays reset (previous reset: %s)', (previousReset) => {
+        const options = {threadId: 's', codexHome: home()};
+        const ledger = new CodexUsageAccounting(options);
+        const reset = snapshot(0);
+        reset.tokenUsage.total.totalTokens = 128000;
+        if (previousReset) ledger.update('s', reset);
+        ledger.noteTurnModel('t', 'model-a');
+        ledger.recordResponse('s', rawResponse(100, 'r'));
+        const resumed = new CodexUsageAccounting({...options, usageBaseline: reset});
+        resumed.update('s', reset);
+        expect(resumed.update('s', snapshot(10)).usage.inputTokens).toBe(110);
+    });
+
+    it('keeps child history and reset epochs out of root totals while counting exact child responses', () => {
+        const options = {threadId: 's', codexHome: home()};
+        const ledger = new CodexUsageAccounting(options);
+        ledger.recordResponse('s', rawResponse(100, 'root'));
+        ledger.recordResponse('s', {...rawResponse(30, 'child'), threadId: 'child'});
+        ledger.update('s', {...snapshot(1000), threadId: 'child'});
+        expect(ledger.update('s', snapshot(110)).usage.inputTokens).toBe(140);
+        const resumed = new CodexUsageAccounting(options);
+        const reset = snapshot(0);
+        reset.tokenUsage.total.totalTokens = 128000;
+        resumed.update('s', {...reset, threadId: 'child'});
+        resumed.update('s', reset);
+        expect(resumed.update('s', snapshot(10)).usage.inputTokens).toBe(150);
+    });
+
+    it('preserves exact child usage when migrating a pending fork sidecar', () => {
+        const options = {threadId: 's', codexHome: home()};
+        createCodexUsageStore(options.codexHome, 's')!.save({version: 1, pendingForkExclusion: true, modelUsage: {
+            'model-a': {inputTokens: 10, outputTokens: 0, cacheReadInputTokens: 0,
+                cacheCreationInputTokens: 0, reasoningOutputTokens: 0},
+        }});
+        const ledger = new CodexUsageAccounting({...options, usageBaseline: snapshot(1010)});
+        expect(ledger.update('s', snapshot(1020)).usage.inputTokens).toBe(20);
+        expect(new CodexUsageAccounting(options).update('s', snapshot(1030)).usage.inputTokens).toBe(30);
+    });
+
+    it('preserves the last complete sidecar when atomic replacement fails', () => {
+        const directory = home();
+        const store = createCodexUsageStore(directory, 's')!;
+        const before = {version: 1 as const, modelUsage: {m: {inputTokens: 10, outputTokens: 0,
+            cacheReadInputTokens: 0, cacheCreationInputTokens: 0, reasoningOutputTokens: 0}}};
+        store.save(before);
+        const rename = vi.mocked(renameSync).mockImplementationOnce(() => { throw new Error('replacement failed'); });
+        try {
+            expect(() => store.save({version: 1, modelUsage: {m: {...before.modelUsage.m, inputTokens: 20}}})).toThrow('replacement failed');
+            expect(store.load()?.modelUsage['m']?.inputTokens).toBe(10);
+        } finally {
+            rename.mockRestore();
+        }
+    });
+
+    it('leaves previous-model compaction unattributed and resumes the requested model afterwards', () => {
+        const ledger = new CodexUsageAccounting();
+        ledger.noteTurnModel('t', 'new-model');
+        ledger.setCompacting('s', true);
+        expect(ledger.recordResponse('s', rawResponse(10, 'compact'))?.modelUsage[CODEX_UNATTRIBUTED_MODEL]?.inputTokens).toBe(10);
+        ledger.setCompacting('s', false);
+        const result = ledger.recordResponse('s', rawResponse(20, 'answer'));
+        expect(result?.modelUsage['new-model']?.inputTokens).toBe(20);
+        expect(result?.usage.inputTokens).toBe(30);
+    });
+
+    it('uses reroute evidence for one response only, even when usage is absent', () => {
+        const ledger = new CodexUsageAccounting();
+        ledger.noteTurnModel('t', 'requested');
+        ledger.noteReroutedModel('t', 'actual');
+        expect(ledger.recordResponse('s', rawResponse(10, 'first'))?.modelUsage['actual']?.inputTokens).toBe(10);
+        ledger.noteReroutedModel('t', 'actual'); // A buffered notification can replay.
+        expect(ledger.recordResponse('s', rawResponse(20, 'next'))?.modelUsage[CODEX_UNATTRIBUTED_MODEL]?.inputTokens).toBe(20);
+        ledger.noteReroutedModel('other-turn', 'other');
+        ledger.recordResponse('s', {...rawResponse(0, 'unknown'), turnId: 'other-turn', usage: null});
+        expect(ledger.recordResponse('s', {...rawResponse(5, 'last'), turnId: 'other-turn'})?.modelUsage['other']).toBeUndefined();
+    });
     it('keeps disjoint totals and delta across duplicates, model switches and native resets', () => {
         const ledger = new CodexUsageAccounting();
         const raw = {totalTokens: 110, inputTokens: 100, cachedInputTokens: 40,
@@ -37,16 +188,16 @@ describe('Token Usage Events', () => {
             cacheCreationInputTokens: 60, reasoningOutputTokens: 5,
         });
         expect(Object.values(first.delta.usage).reduce((a, b) => a + b, 0)).toBe(110);
-        first.modelUsage[CODEX_UNATTRIBUTED_MODEL].inputTokens = 999;
+        first.modelUsage[CODEX_UNATTRIBUTED_MODEL]!.inputTokens = 999;
         expect(send(raw).delta.usage.inputTokens).toBe(0);
         const reset = {totalTokens: 128000, inputTokens: 0, cachedInputTokens: 0,
             cacheWriteInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0};
-        expect(send(reset).modelUsage[CODEX_UNATTRIBUTED_MODEL].cacheCreationInputTokens).toBe(60);
+        expect(send(reset).modelUsage[CODEX_UNATTRIBUTED_MODEL]?.cacheCreationInputTokens).toBe(60);
         send(reset);
         const next = send(raw);
-        expect(next.modelUsage[CODEX_UNATTRIBUTED_MODEL].cacheCreationInputTokens).toBe(120);
+        expect(next.modelUsage[CODEX_UNATTRIBUTED_MODEL]?.cacheCreationInputTokens).toBe(120);
         expect(next.delta.usage.cacheCreationInputTokens).toBe(60);
-        expect(next.modelUsage[CODEX_UNATTRIBUTED_MODEL].costUSD).toBeUndefined();
+        expect(next.modelUsage[CODEX_UNATTRIBUTED_MODEL]?.costUSD).toBeUndefined();
     });
 
     it('attributes exact per-response usage to the active model', () => {
@@ -81,9 +232,11 @@ describe('Token Usage Events', () => {
     });
 
     it('excludes fork source history and attributes only post-fork responses', () => {
-        const ledger = new CodexUsageAccounting({forkFromHistory: true});
         const source = {totalTokens: 1000, inputTokens: 900, cachedInputTokens: 0,
             cacheWriteInputTokens: 0, outputTokens: 100, reasoningOutputTokens: 0};
+        const ledger = new CodexUsageAccounting({forkFromHistory: true, usageBaseline: {
+            threadId: 's', turnId: 'source', tokenUsage: {total: source, last: source, modelContextWindow: 128000},
+        }});
         const fresh = {totalTokens: 110, inputTokens: 100, cachedInputTokens: 0,
             cacheWriteInputTokens: 0, outputTokens: 10, reasoningOutputTokens: 0};
         ledger.noteTurnModel('turn-id', 'gpt-5.3-codex');
@@ -140,7 +293,9 @@ describe('Token Usage Events', () => {
                 };
             });
 
-            vi.spyOn(codexAcpAgent, 'getSessionState').mockReturnValue(createTestSessionState({ sessionId }));
+            vi.spyOn(codexAcpAgent, 'getSessionState').mockReturnValue(createTestSessionState({ sessionId,
+                usageAccounting: new CodexUsageAccounting(),
+            }));
 
             return codexAcpAgent;
         }
@@ -274,7 +429,9 @@ describe('Token Usage Events', () => {
                 };
             });
 
-            vi.spyOn(codexAcpAgent, 'getSessionState').mockReturnValue(createTestSessionState({ sessionId }));
+            vi.spyOn(codexAcpAgent, 'getSessionState').mockReturnValue(createTestSessionState({ sessionId,
+                usageAccounting: new CodexUsageAccounting(),
+            }));
 
             return async () => {
                 await codexAcpAgent.prompt({

@@ -21,6 +21,7 @@ describe("CodexAppServerClient turn lifecycle", () => {
         });
         return {
             client,
+            notify: (event: ServerNotification) => notify(event),
             close: () => close(),
             start: (threadId = "thread-1", turnId = "compact-1") => notify({
                 method: "turn/started", params: {threadId, turn: turn(turnId, "inProgress")},
@@ -30,6 +31,46 @@ describe("CodexAppServerClient turn lifecycle", () => {
             }),
         };
     }
+
+    it("holds fork completion until restored usage has arrived before thread/started", async () => {
+        const response = {thread: {id: "child"}};
+        const h = compactHarness(async () => response);
+        let completed = false;
+        const fork = h.client.threadFork({threadId: "parent"}).then(result => {
+            completed = true;
+            return result;
+        });
+        await Promise.resolve();
+        expect(completed).toBe(false);
+        const raw = {inputTokens: 100, cachedInputTokens: 0, cacheWriteInputTokens: 0,
+            outputTokens: 10, reasoningOutputTokens: 0, totalTokens: 110};
+        const baseline = {threadId: "child", turnId: "inherited-turn",
+            tokenUsage: {total: raw, last: raw, modelContextWindow: 1000}};
+        h.notify({method: "thread/tokenUsage/updated", params: baseline});
+        h.notify({method: "thread/started", params: {thread: {id: "other"}}} as ServerNotification);
+        await Promise.resolve();
+        expect(completed).toBe(false);
+        h.notify({method: "thread/started", params: {thread: {id: "child"}}} as ServerNotification);
+        await expect(fork).resolves.toEqual(response);
+        expect(h.client.getThreadTokenUsage("child")).toEqual(baseline);
+    });
+
+    it.each([false, true])("finishes an empty fork without a usage notification (excludeTurns=%s)", async excludeTurns => {
+        let acknowledge: (value: unknown) => void = () => {};
+        const h = compactHarness(() => new Promise(resolve => { acknowledge = resolve; }));
+        const fork = h.client.threadFork({threadId: "parent", excludeTurns});
+        h.notify({method: "thread/started", params: {thread: {id: "child"}}} as ServerNotification);
+        acknowledge({thread: {id: "child"}});
+        await expect(fork).resolves.toEqual({thread: {id: "child"}});
+        expect(h.client.getThreadTokenUsage("child")).toBeUndefined();
+    });
+
+    it("rejects a fork awaiting native startup when the process exits", async () => {
+        const h = compactHarness(async () => ({thread: {id: "child"}}));
+        const fork = h.client.threadFork({threadId: "parent"});
+        h.close();
+        await expect(fork).rejects.toThrow("Codex process exited");
+    });
 
     it.each(["completed", "interrupted", "failed"] as const)("settles compact from its native %s turn, even before the start ACK", async (status) => {
         let acknowledge: () => void = () => {};

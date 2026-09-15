@@ -49,7 +49,7 @@ describe("local project identity across worktrees", () => {
         const result = await fixture.getCodexAcpClient().newSession({cwd, mcpServers: [], _meta: metadata()});
         expect(result.sessionId).toBe("thread-1");
         expect(start).toHaveBeenCalledWith({
-            cwd, projectId: "original-project", modelProvider: null,
+            cwd, projectId: "original-project", modelProvider: null, experimentalRawEvents: true,
             config: {projects: {[cwd]: {trust_level: "trusted"}}},
         });
     });
@@ -148,7 +148,7 @@ describe("local project identity across worktrees", () => {
         vi.spyOn(native, "projectList").mockRejectedValue(new Error("unexpected project lookup"));
         const start = vi.spyOn(native, "threadStart").mockResolvedValue(resumed() as never);
         await fixture.getCodexAcpClient().newSession({cwd: root, mcpServers: []});
-        expect(start).toHaveBeenCalledWith({cwd: root, modelProvider: null, config: {projects: {[root]: {trust_level: "trusted"}}}});
+        expect(start).toHaveBeenCalledWith({cwd: root, modelProvider: null, experimentalRawEvents: true, config: {projects: {[root]: {trust_level: "trusted"}}}});
     });
 
     it("rejects ambiguous roots instead of assigning an arbitrary project", async () => {

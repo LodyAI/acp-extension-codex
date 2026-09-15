@@ -67,8 +67,19 @@ the adapter can resolve it; unresolved or legacy totals remain in
 `codex:unattributed`. A sidecar under `$CODEX_HOME` restores the cumulative ledger
 after process restarts, and fork sessions exclude source history. Missing costs stay
 unknown. `delta` is already included in cumulative totals. The legacy top-level `usage`
-remains cumulative. Durable resume accounting is still bounded by that machine-local
-sidecar.
+remains cumulative. The sidecar also stores the native reset cursor; forks capture
+the replayed history total before their first turn. Durable resume accounting is
+still bounded by that machine-local sidecar. Older sidecars are anchored to the
+restored native snapshot; already missing historical usage cannot be reconstructed.
+
+Codex 0.153.4 exposes the raw-event opt-in only on `thread/start`. Cold resumes
+and new forks therefore keep new usage unattributed; adding the unsupported flag
+to those requests would not enable it. Compaction may use the previous model or
+a fallback, so its responses remain unattributed. A reroute identifies only its
+next response; later responses in that turn remain unattributed.
+Child native totals cannot serve as root totals: they contain inherited history
+and reset independently. Child usage joins the ledger only through exact responses;
+child activity without those events cannot be counted by this adapter.
 
 Codex steering uses `_lody/session/steer` and confirms application with
 `_lody/session/steer_applied`. It keeps the active turn's model, mode, and

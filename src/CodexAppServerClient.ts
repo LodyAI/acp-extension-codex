@@ -63,6 +63,7 @@ import type {
     ThreadResumeParams,
     ThreadResumeResponse,
     ThreadSettings,
+    ThreadTokenUsageUpdatedNotification,
     ThreadStartParams,
     ThreadStartResponse,
     ThreadSetNameParams,
@@ -183,6 +184,13 @@ export class CodexAppServerClient {
     private readonly threadGoalUpdateCaptures = new Map<string, Set<(event: ThreadGoalUpdatedNotification) => void>>();
     private readonly threadGoalClearedCaptures = new Map<string, Set<() => void>>();
     private readonly threadSettings = new Map<string, ThreadSettings>();
+    private readonly threadTokenUsage = new Map<string, ThreadTokenUsageUpdatedNotification>();
+    private readonly forkStartWaiters = new Set<{
+        started: Set<string>;
+        threadId: string | undefined;
+        resolve: () => void;
+        reject: (error: Error) => void;
+    }>();
     private readonly staleTurnIds = new Map<string, Set<string>>();
     private turnCompletionTerminalError: Error | null = null;
 
@@ -190,13 +198,25 @@ export class CodexAppServerClient {
         this.connection = connection;
         // Process exit disposes the connection (see CodexJsonRpcConnection);
         // fail waiters that only a now-impossible notification could settle.
-        const failPendingTurns = () => this.rejectAllPendingTurnCompletions(
-            new Error("Codex process exited before completing the turn"),
-        );
+        const failPendingTurns = () => {
+            const error = new Error("Codex process exited before completing the turn");
+            this.rejectAllPendingTurnCompletions(error);
+            for (const waiter of this.forkStartWaiters) waiter.reject(error);
+        };
         this.connection.onClose(failPendingTurns);
         this.connection.onDispose(failPendingTurns);
         this.connection.onUnhandledNotification((data) => {
             const serverNotification = data as ServerNotification;
+            if (serverNotification.method === "thread/tokenUsage/updated") {
+                this.threadTokenUsage.set(serverNotification.params.threadId, serverNotification.params);
+            }
+            if (serverNotification.method === "thread/started") {
+                const threadId = serverNotification.params.thread.id;
+                for (const waiter of this.forkStartWaiters) {
+                    waiter.started.add(threadId);
+                    if (waiter.threadId === threadId) waiter.resolve();
+                }
+            }
             if (isMcpServerStatusUpdatedNotification(serverNotification)) {
                 this.mcpServerStartupVersion += 1;
                 this.mcpServerStartupStates.set(serverNotification.params.name, {
@@ -608,7 +628,7 @@ export class CodexAppServerClient {
         await this.sendRequest({method: "thread/metadata/update", params});
     }
 
-    async threadStart(params: ThreadStartParams & {projectId?: string}): Promise<ThreadStartResponse> {
+    async threadStart(params: ThreadStartParams & {projectId?: string; experimentalRawEvents?: boolean}): Promise<ThreadStartResponse> {
         return await this.sendRequest({ method: "thread/start", params: params });
     }
 
@@ -621,7 +641,32 @@ export class CodexAppServerClient {
     }
 
     async threadFork(params: ExperimentalThreadForkParams): Promise<ThreadForkResponse> {
-        return await this.sendRequest({ method: "thread/fork", params: params });
+        if (this.turnCompletionTerminalError) throw this.turnCompletionTerminalError;
+        let resolve = () => {};
+        let reject = (_error: Error) => {};
+        const started = new Promise<void>((onStarted, onError) => {
+            resolve = onStarted;
+            reject = onError;
+        });
+        const waiter = {started: new Set<string>(), threadId: undefined as string | undefined, resolve, reject};
+        this.forkStartWaiters.add(waiter);
+        try {
+            const response = this.sendRequest<ThreadForkResponse>({method: "thread/fork", params}).then(response => {
+                waiter.threadId = response.thread.id;
+                if (waiter.started.has(response.thread.id)) waiter.resolve();
+                return response;
+            });
+            // Native sends restored usage after the response, then thread/started.
+            // Waiting for usage itself would hang for empty/excludeTurns forks.
+            const [result] = await Promise.all([response, started]);
+            return result;
+        } finally {
+            this.forkStartWaiters.delete(waiter);
+        }
+    }
+
+    getThreadTokenUsage(threadId: string): ThreadTokenUsageUpdatedNotification | undefined {
+        return this.threadTokenUsage.get(threadId);
     }
 
     getThreadSettings(threadId: string): ThreadSettings | undefined {

@@ -40,6 +40,14 @@
   accumulator on SessionState across prompt handlers and context-window fill resets;
   emitted delta is already included in modelUsage. Forked sessions must exclude source
   history from their own totals.
+  Enable `thread/start.experimentalRawEvents`; pinned cold resume/fork cannot opt in
+  and retain unattributed totals. Capture fork replay before `thread/started`, never
+  infer source history from a paid response. Persist the native reset cursor with the
+  model ledger. Compaction has no reliable response model; keep it unattributed.
+  A reroute notification identifies only the next response, not the rest of the turn.
+  Child native totals include inherited history and independent reset epochs; only
+  child exact responses join the root ledger. Persist pending root responses so a
+  reset replay cannot lose raw usage whose native notification was still queued.
 
 - Manual `/compact` owns the native turn reported by `turn/started` until matching
   `turn/completed`. Cancel sends `turn/interrupt`; a pre-start cancellation waits for
