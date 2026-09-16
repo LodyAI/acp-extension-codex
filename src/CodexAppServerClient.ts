@@ -185,12 +185,6 @@ export class CodexAppServerClient {
     private readonly threadGoalClearedCaptures = new Map<string, Set<() => void>>();
     private readonly threadSettings = new Map<string, ThreadSettings>();
     private readonly threadTokenUsage = new Map<string, ThreadTokenUsageUpdatedNotification>();
-    private readonly forkStartWaiters = new Set<{
-        started: Set<string>;
-        threadId: string | undefined;
-        resolve: () => void;
-        reject: (error: Error) => void;
-    }>();
     private readonly staleTurnIds = new Map<string, Set<string>>();
     private turnCompletionTerminalError: Error | null = null;
 
@@ -201,7 +195,6 @@ export class CodexAppServerClient {
         const failPendingTurns = () => {
             const error = new Error("Codex process exited before completing the turn");
             this.rejectAllPendingTurnCompletions(error);
-            for (const waiter of this.forkStartWaiters) waiter.reject(error);
         };
         this.connection.onClose(failPendingTurns);
         this.connection.onDispose(failPendingTurns);
@@ -209,13 +202,6 @@ export class CodexAppServerClient {
             const serverNotification = data as ServerNotification;
             if (serverNotification.method === "thread/tokenUsage/updated") {
                 this.threadTokenUsage.set(serverNotification.params.threadId, serverNotification.params);
-            }
-            if (serverNotification.method === "thread/started") {
-                const threadId = serverNotification.params.thread.id;
-                for (const waiter of this.forkStartWaiters) {
-                    waiter.started.add(threadId);
-                    if (waiter.threadId === threadId) waiter.resolve();
-                }
             }
             if (isMcpServerStatusUpdatedNotification(serverNotification)) {
                 this.mcpServerStartupVersion += 1;
@@ -641,28 +627,7 @@ export class CodexAppServerClient {
     }
 
     async threadFork(params: ExperimentalThreadForkParams): Promise<ThreadForkResponse> {
-        if (this.turnCompletionTerminalError) throw this.turnCompletionTerminalError;
-        let resolve = () => {};
-        let reject = (_error: Error) => {};
-        const started = new Promise<void>((onStarted, onError) => {
-            resolve = onStarted;
-            reject = onError;
-        });
-        const waiter = {started: new Set<string>(), threadId: undefined as string | undefined, resolve, reject};
-        this.forkStartWaiters.add(waiter);
-        try {
-            const response = this.sendRequest<ThreadForkResponse>({method: "thread/fork", params}).then(response => {
-                waiter.threadId = response.thread.id;
-                if (waiter.started.has(response.thread.id)) waiter.resolve();
-                return response;
-            });
-            // Native sends restored usage after the response, then thread/started.
-            // Waiting for usage itself would hang for empty/excludeTurns forks.
-            const [result] = await Promise.all([response, started]);
-            return result;
-        } finally {
-            this.forkStartWaiters.delete(waiter);
-        }
+        return await this.sendRequest({method: "thread/fork", params});
     }
 
     getThreadTokenUsage(threadId: string): ThreadTokenUsageUpdatedNotification | undefined {

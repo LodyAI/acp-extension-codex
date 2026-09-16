@@ -780,11 +780,12 @@ export class CodexAcpServer {
             ),
             asyncTasks: this.createAsyncTasks(sessionId),
         };
+        const usageBaseline = this.codexAcpClient.appServerClient.getThreadTokenUsage(sessionId);
         const usageAccounting = new CodexUsageAccounting({
             threadId: sessionId,
             codexHome: this.codexAcpClient.getHomePath(),
             forkFromHistory: operation.kind === "fork",
-            ...(sessionMetadata.usageBaseline && {usageBaseline: sessionMetadata.usageBaseline}),
+            ...(usageBaseline && {usageBaseline}),
         });
         try {
             usageAccounting.noteThreadModel(sessionId, ModelId.fromString(currentModelId).model);
@@ -2177,10 +2178,11 @@ export class CodexAcpServer {
             ),
             asyncTasks: this.createAsyncTasks(sessionId),
         };
+        const usageBaseline = this.codexAcpClient.appServerClient.getThreadTokenUsage(sessionId);
         const usageAccounting = new CodexUsageAccounting({
             threadId: sessionId,
             codexHome: this.codexAcpClient.getHomePath(),
-            ...(sessionMetadata.usageBaseline && {usageBaseline: sessionMetadata.usageBaseline}),
+            ...(usageBaseline && {usageBaseline}),
         });
         try {
             usageAccounting.noteThreadModel(sessionId, ModelId.fromString(currentModelId).model);

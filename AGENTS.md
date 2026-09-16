@@ -38,12 +38,14 @@
   never the UI model. Attribute exact per-response events to the resolved thread/turn
   model and preserve a small `$CODEX_HOME` sidecar across restarts. Keep the accounting
   accumulator on SessionState across prompt handlers and context-window fill resets;
-  emitted delta is already included in modelUsage. Forked sessions must exclude source
-  history from their own totals. A resumed thread without a sidecar starts a fresh
+  emitted delta is already included in modelUsage. Native usage snapshots stay adapter-local,
+  never on SessionMetadata or session meta. Fork history exclusion is best effort using
+  an already cached snapshot; do not wait for replay solely for accounting accuracy.
+  Fork and similar special operations may over/undercount. A resumed thread without a sidecar starts a fresh
   lifetime at the captured native baseline and reports later increments only.
   Enable `thread/start.experimentalRawEvents`; pinned cold resume/fork cannot opt in
-  and retain unattributed totals. Capture fork replay before `thread/started`, never
-  infer source history from a paid response. Persist the native reset cursor with the
+  and retain unattributed totals. Never infer source history from a paid response.
+  Persist the native reset cursor with the
   model ledger. Compaction has no reliable response model; keep it unattributed.
   A reroute notification identifies only the next response, not the rest of the turn.
   Child native totals include inherited history and independent reset epochs; only

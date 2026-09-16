@@ -163,8 +163,8 @@ export class CodexUsageAccounting {
             this.excludedTotal = empty();
         }
         if (options.forkFromHistory || restored?.pendingForkExclusion) {
-            // Fork replay precedes thread/started. Its captured total is source
-            // history; never infer this from the first paid response's total.
+            // Exclude source history only when its snapshot is already cached.
+            // Fork does not wait for replay; never infer history from paid usage.
             const baseline = options.usageBaseline
                 ? normalizeCodexUsage(options.usageBaseline.tokenUsage.total)
                 : empty();

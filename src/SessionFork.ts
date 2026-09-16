@@ -56,7 +56,6 @@ export async function forkSession(
     }
 
     const models = await dependencies.fetchAvailableModels();
-    const usageBaseline = dependencies.codexClient.getThreadTokenUsage(response.thread.id);
     return {
         sessionId: response.thread.id,
         currentModelId: dependencies.createCurrentModelId(models, response.model, response.reasoningEffort),
@@ -65,7 +64,6 @@ export async function forkSession(
         modelProvider: response.modelProvider,
         currentServiceTier: response.serviceTier as ServiceTier ?? null,
         additionalDirectories,
-        ...(usageBaseline ? {usageBaseline} : {}),
     };
 }
 

@@ -1,6 +1,6 @@
 import type {ModeKind} from "./app-server/ModeKind";
 import type {ServiceTier} from "./app-server/ServiceTier";
-import type {Model, Thread, ThreadTokenUsageUpdatedNotification} from "./app-server/v2";
+import type {Model, Thread} from "./app-server/v2";
 
 export type SessionMetadata = {
     sessionId: string,
@@ -10,7 +10,6 @@ export type SessionMetadata = {
     modelProvider?: string | null,
     currentServiceTier?: ServiceTier | null,
     additionalDirectories: string[],
-    usageBaseline?: ThreadTokenUsageUpdatedNotification,
 }
 
 export type SessionMetadataWithThread = SessionMetadata & {
