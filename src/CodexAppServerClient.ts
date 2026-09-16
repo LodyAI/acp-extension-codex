@@ -63,7 +63,6 @@ import type {
     ThreadResumeParams,
     ThreadResumeResponse,
     ThreadSettings,
-    ThreadTokenUsageUpdatedNotification,
     ThreadStartParams,
     ThreadStartResponse,
     ThreadSetNameParams,
@@ -184,7 +183,6 @@ export class CodexAppServerClient {
     private readonly threadGoalUpdateCaptures = new Map<string, Set<(event: ThreadGoalUpdatedNotification) => void>>();
     private readonly threadGoalClearedCaptures = new Map<string, Set<() => void>>();
     private readonly threadSettings = new Map<string, ThreadSettings>();
-    private readonly threadTokenUsage = new Map<string, ThreadTokenUsageUpdatedNotification>();
     private readonly staleTurnIds = new Map<string, Set<string>>();
     private turnCompletionTerminalError: Error | null = null;
 
@@ -200,9 +198,6 @@ export class CodexAppServerClient {
         this.connection.onDispose(failPendingTurns);
         this.connection.onUnhandledNotification((data) => {
             const serverNotification = data as ServerNotification;
-            if (serverNotification.method === "thread/tokenUsage/updated") {
-                this.threadTokenUsage.set(serverNotification.params.threadId, serverNotification.params);
-            }
             if (isMcpServerStatusUpdatedNotification(serverNotification)) {
                 this.mcpServerStartupVersion += 1;
                 this.mcpServerStartupStates.set(serverNotification.params.name, {
@@ -614,7 +609,7 @@ export class CodexAppServerClient {
         await this.sendRequest({method: "thread/metadata/update", params});
     }
 
-    async threadStart(params: ThreadStartParams & {projectId?: string; experimentalRawEvents?: boolean}): Promise<ThreadStartResponse> {
+    async threadStart(params: ThreadStartParams & {projectId?: string}): Promise<ThreadStartResponse> {
         return await this.sendRequest({ method: "thread/start", params: params });
     }
 
@@ -628,10 +623,6 @@ export class CodexAppServerClient {
 
     async threadFork(params: ExperimentalThreadForkParams): Promise<ThreadForkResponse> {
         return await this.sendRequest({method: "thread/fork", params});
-    }
-
-    getThreadTokenUsage(threadId: string): ThreadTokenUsageUpdatedNotification | undefined {
-        return this.threadTokenUsage.get(threadId);
     }
 
     getThreadSettings(threadId: string): ThreadSettings | undefined {

@@ -33,24 +33,11 @@
 
 ## Docs
 
-- Usage buckets are disjoint. Native thread totals have no model attribution:
-  keep any total not covered by `rawResponse/completed` in `codex:unattributed`,
-  never the UI model. Attribute exact per-response events to the resolved thread/turn
-  model and preserve a small `$CODEX_HOME` sidecar across restarts. Keep the accounting
-  accumulator on SessionState across prompt handlers and context-window fill resets;
-  emitted delta is already included in modelUsage. Native usage snapshots stay adapter-local,
-  never on SessionMetadata or session meta. Fork history exclusion is best effort using
-  an already cached snapshot; do not wait for replay solely for accounting accuracy.
-  Fork and similar special operations may over/undercount. A resumed thread without a sidecar starts a fresh
-  lifetime at the captured native baseline and reports later increments only.
-  Enable `thread/start.experimentalRawEvents`; pinned cold resume/fork cannot opt in
-  and retain unattributed totals. Never infer source history from a paid response.
-  Persist the native reset cursor with the
-  model ledger. Compaction has no reliable response model; keep it unattributed.
-  A reroute notification identifies only the next response, not the rest of the turn.
-  Child native totals include inherited history and independent reset epochs; only
-  child exact responses join the root ledger. Persist pending root responses so a
-  reset replay cannot lose raw usage whose native notification was still queued.
+- Usage reports project only the root thread's native `thread/tokenUsage/updated`
+  snapshot into disjoint buckets under `codex:unattributed`; no model or price
+  attribution, raw-response accounting, sidecar, baseline, reset cursor, or delta.
+  Native resume/fork totals may include inherited history and counters may reset.
+  Do not compensate these in the adapter or add child thread totals to the root.
 
 - Manual `/compact` owns the native turn reported by `turn/started` until matching
   `turn/completed`. Cancel sends `turn/interrupt`; a pre-start cancellation waits for

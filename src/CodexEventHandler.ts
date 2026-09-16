@@ -15,7 +15,6 @@ import {
     ACP_EXT_SESSION_RATE_LIMITS_METHOD,
     ACP_EXT_SESSION_USAGE_UPDATE_METHOD,
     type SessionRateLimitsExtNotification,
-    type SessionUsageExtNotification,
 } from "./AcpExtensions";
 import type {
     AccountUpdatedNotification,
@@ -46,7 +45,7 @@ import type {
 } from "./app-server/v2";
 import type { McpStartupCompleteEvent } from "./app-server/McpStartupCompleteEvent";
 import {toTokenCount} from "./TokenCount";
-import {CodexUsageAccounting} from "./CodexUsageAccounting";
+import {toCodexUsageUpdate} from "./CodexUsage";
 import {
     commandExecutionUsesTerminalOutput,
     createCommandExecutionUpdate,
@@ -664,62 +663,18 @@ export class CodexEventHandler {
     }
 
     private async emitExtNotification(notification: ServerNotification): Promise<void> {
-        switch (notification.method) {
-            case "turn/completed":
-                this.sessionState.usageAccounting?.setCompacting(notification.params.threadId, false);
-                return;
-            case "item/started":
-            case "item/completed":
-                if (notification.params.item.type === "contextCompaction") {
-                    this.sessionState.usageAccounting?.setCompacting(
-                        notification.params.threadId,
-                        notification.method === "item/started",
-                    );
-                }
-                return;
-            case "model/rerouted":
-                this.sessionState.usageAccounting?.noteReroutedModel(
-                    notification.params.turnId,
-                    notification.params.toModel,
-                );
-                return;
-            case "thread/tokenUsage/updated":
-                await this.notifyExt(
-                    ACP_EXT_SESSION_USAGE_UPDATE_METHOD,
-                    this.createSessionUsageExtNotification(notification.params)
-                );
-                return;
-            case "thread/settings/updated":
-                this.sessionState.usageAccounting?.noteThreadModel(
-                    notification.params.threadId,
-                    notification.params.threadSettings.model
-                );
-                return;
-            case "rawResponse/completed": {
-                const update = this.sessionState.usageAccounting?.recordResponse(
-                    this.sessionState.sessionId,
-                    notification.params
-                );
-                if (update) {
-                    await this.notifyExt(ACP_EXT_SESSION_USAGE_UPDATE_METHOD, update);
-                }
-                return;
-            }
-            default:
-                return;
+        if (notification.method === "thread/tokenUsage/updated"
+            && notification.params.threadId === this.sessionState.sessionId) {
+            await this.notifyExt(
+                ACP_EXT_SESSION_USAGE_UPDATE_METHOD,
+                toCodexUsageUpdate(notification.params),
+            );
         }
     }
 
     private async notifyExt<Params>(method: string, params: Params): Promise<void> {
         const extMethod = method.startsWith("_") ? method : `_${method}`;
         await this.connection.notify(extMethod, params);
-    }
-
-    private createSessionUsageExtNotification(params: ThreadTokenUsageUpdatedNotification): SessionUsageExtNotification {
-        this.sessionState.usageAccounting ??= new CodexUsageAccounting({
-            threadId: this.sessionState.sessionId,
-        });
-        return this.sessionState.usageAccounting.update(this.sessionState.sessionId, params);
     }
 
     private createSessionRateLimitsExtNotification(

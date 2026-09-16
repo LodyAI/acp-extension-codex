@@ -60,31 +60,17 @@ rate-limit query, acknowledged steering, goals, subagent/background-task lifecyc
 compaction lifecycle, and history reads. ACP-standard plans, elicitation, session
 forking, and context-window usage stay on their standard protocol paths.
 
-Accounting converts inclusive native counters into disjoint token buckets and
-preserves totals across context-window fill resets. Exact per-response usage from
-`rawResponse/completed` is attributed to the model that produced the response when
-the adapter can resolve it; unresolved or legacy totals remain in
-`codex:unattributed`. A sidecar under `$CODEX_HOME` restores the cumulative ledger
-after process restarts. Fork history exclusion is best effort using an already
-cached native snapshot, without waiting for replay; fork and similar special
-operations may over/undercount. Usage baselines are not stored on session metadata.
-If the sidecar
-is missing for a resumed thread, the adapter starts a fresh accounting lifetime
-at the captured native baseline and reports only later increments; it does not
-re-emit already persisted history under a new model key. Missing costs stay
-unknown. `delta` is already included in cumulative totals. The legacy top-level `usage`
-remains cumulative. The sidecar also stores the native reset cursor. Durable resume accounting is
-still bounded by that machine-local sidecar. Older sidecars are anchored to the
-restored native snapshot; already missing historical usage cannot be reconstructed.
+Usage reporting projects Codex's native root-thread cumulative snapshot into
+disjoint token buckets under `codex:unattributed`. It does not attribute totals
+to the selected model, estimate costs, or manufacture a delta. Context-window
+usage remains separate from accounting totals.
 
-Codex 0.153.4 exposes the raw-event opt-in only on `thread/start`. Cold resumes
-and new forks therefore keep new usage unattributed; adding the unsupported flag
-to those requests would not enable it. Compaction may use the previous model or
-a fallback, so its responses remain unattributed. A reroute identifies only its
-next response; later responses in that turn remain unattributed.
-Child native totals cannot serve as root totals: they contain inherited history
-and reset independently. Child usage joins the ledger only through exact responses;
-child activity without those events cannot be counted by this adapter.
+Codex owns persistence and restoration of its native counters. The adapter has
+no usage sidecar, baseline, reset cursor, or response-level ledger. It accepts
+native counter resets and inherited resume/fork history without compensation;
+child-thread totals are not added to the root. Accurate historical per-model
+totals and costs are intentionally not provided. Old development sidecar files
+are ignored and are not automatically deleted.
 
 Codex steering uses `_lody/session/steer` and confirms application with
 `_lody/session/steer_applied`. It keeps the active turn's model, mode, and

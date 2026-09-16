@@ -36,17 +36,6 @@ describe("CodexAppServerClient turn lifecycle", () => {
         const response = {thread: {id: "child"}};
         const h = compactHarness(async () => response);
         await expect(h.client.threadFork({threadId: "parent"})).resolves.toEqual(response);
-        expect(h.client.getThreadTokenUsage("child")).toBeUndefined();
-    });
-
-    it("retains native usage locally even without a session notification handler", () => {
-        const h = compactHarness();
-        const raw = {inputTokens: 100, cachedInputTokens: 0, cacheWriteInputTokens: 0,
-            outputTokens: 10, reasoningOutputTokens: 0, totalTokens: 110};
-        const baseline = {threadId: "child", turnId: "inherited-turn",
-            tokenUsage: {total: raw, last: raw, modelContextWindow: 1000}};
-        h.notify({method: "thread/tokenUsage/updated", params: baseline});
-        expect(h.client.getThreadTokenUsage("child")).toEqual(baseline);
     });
 
     it.each(["completed", "interrupted", "failed"] as const)("settles compact from its native %s turn, even before the start ACK", async (status) => {

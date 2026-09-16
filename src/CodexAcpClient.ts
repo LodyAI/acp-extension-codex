@@ -632,7 +632,6 @@ export class CodexAcpClient {
         const projectId = await this.worktreeProjects.resolve(project);
         const response = await this.codexClient.threadStart({
             ...(projectId ? {projectId} : {}),
-            experimentalRawEvents: true,
             config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers),
             modelProvider: this.getModelProvider(),
             cwd: request.cwd,
