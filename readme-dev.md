@@ -99,3 +99,20 @@ npm run package:all
 ## Plan configuration
 
 Codex translates Core’s boolean `plan_mode` option to its native default/plan collaboration state. Approval and sandbox settings are retained. The `/plan` command uses the same boolean configuration path.
+
+## Steering delivery reconciliation
+
+After a failed `turn/steer` response, the adapter keeps the original thread id,
+turn id, and steer id while draining received notifications. Unless Codex explicitly
+refused the steer, it then reads `thread/read(includeTurns: true)` once. A matching
+`userMessage.clientId` in the original turn emits the same applied notification as
+the live event, at most once. Normal successful responses retain the existing live
+notification path.
+
+Notification drain and history lookup share a five-second budget; a live applied
+event can finish reconciliation while the read is pending. Missing history, an
+unsupported/failed read, timeout, or a completed/interrupted turn do not prove
+non-delivery. Without positive evidence, an ambiguous response still rejects the
+request so the host preserves `unknown`. Late read results cannot acknowledge after
+that verdict. No steer retry, new turn, session resume, or cross-restart recovery is
+performed. See [the protocol](https://learn.chatgpt.com/docs/app-server#read-a-stored-thread-without-resuming).

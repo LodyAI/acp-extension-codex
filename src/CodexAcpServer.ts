@@ -271,7 +271,12 @@ interface ActivePrompt {
 
 interface PendingSteer {
     activePrompt: ActivePrompt;
+    threadId: string;
     turnId: string;
+    requestPending: boolean;
+    acknowledgement: Promise<void> | null;
+    applied: Promise<void>;
+    resolveApplied: () => void;
 }
 
 export interface CodexProcessState {
@@ -1698,7 +1703,7 @@ export class CodexAcpServer {
 
         const turnId = await this.getSteerableTurnId(sessionState);
         if (turnId) {
-            const injected = await this.injectSteerIntoActiveTurn(params, turnId, sessionState);
+            const injected = await this.injectSteerIntoActiveTurn(params, turnId);
             if (injected) {
                 logger.log("Steering session injected", {sessionId: params.sessionId, turnId});
                 return {outcome: "injected"};
@@ -1721,18 +1726,12 @@ export class CodexAcpServer {
     /**
      * Attempts to inject the prompt into the given running turn.
      *
-     * A failed injection is fatal only when the turn is still the session's
-     * current turn and Codex reported something other than "no active turn to
-     * steer". Otherwise the turn has already ended underneath us and steering
-     * reports a failed delivery.
-     *
-     * @returns true when the prompt was injected; false when the target turn
-     *     already ended.
+     * After submission, only an explicit refusal proves non-delivery. A turn
+     * ending (including Stop) does not prove whether it consumed the input.
      */
     private async injectSteerIntoActiveTurn(
         params: SessionSteerRequest,
         turnId: string,
-        sessionState: SessionState,
     ): Promise<boolean> {
         const activePrompt = this.activePrompts.get(params.sessionId);
         const activeTurn = activePrompt?.currentTurn;
@@ -1753,9 +1752,16 @@ export class CodexAcpServer {
         if (pending.has(params.steerId)) {
             throw RequestError.invalidRequest(`Duplicate Codex steer id: ${params.steerId}`);
         }
-        pending.set(params.steerId, {activePrompt, turnId});
+        let resolveApplied: () => void = () => {};
+        const applied = new Promise<void>(resolve => { resolveApplied = resolve; });
+        const steer: PendingSteer = {
+            activePrompt, threadId: activeTurn.threadId, turnId,
+            requestPending: true, acknowledgement: null, applied, resolveApplied,
+        };
+        pending.set(params.steerId, steer);
         this.pendingSteers.set(params.sessionId, pending);
 
+        let requestAccepted = false;
         try {
             const response = await this.runWithProcessCheck(() => this.codexAcpClient.steerTurn({
                 threadId: activeTurn.threadId,
@@ -1769,18 +1775,59 @@ export class CodexAcpServer {
                     `Codex steered unexpected turn ${response.turnId}; expected ${turnId}`,
                 );
             }
+            requestAccepted = true;
             return true;
         } catch (err) {
-            if (pending.get(params.steerId)?.activePrompt === activePrompt) {
-                pending.delete(params.steerId);
-                if (pending.size === 0) this.pendingSteers.delete(params.sessionId);
+            const refused = this.isNoActiveTurnToSteerError(err);
+            if (await this.reconcileSteer(params, steer, !refused)) {
+                await this.acknowledgeSteer(params.sessionId, params.steerId, steer);
+                return true;
             }
-            await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
-            const turnStillActive = sessionState.currentTurnId === turnId;
-            if (turnStillActive && !this.isNoActiveTurnToSteerError(err)) {
-                throw err;
+            if (refused) return false;
+            throw err;
+        } finally {
+            steer.requestPending = false;
+            if (!requestAccepted || this.activePrompts.get(params.sessionId) !== activePrompt) {
+                this.removePendingSteer(params.sessionId, params.steerId, steer);
             }
-            return false;
+        }
+    }
+
+    private async reconcileSteer(
+        params: SessionSteerRequest,
+        steer: PendingSteer,
+        readHistory: boolean,
+    ): Promise<boolean> {
+        let finished = false;
+        let timeout: ReturnType<typeof setTimeout> | undefined;
+        try {
+            // This drains received notifications, not the transport or rollout
+            // store. Missing history therefore cannot establish non-delivery.
+            const historyApplied = (async () => {
+                await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
+                if (steer.acknowledgement !== null) return true;
+                if (finished || !readHistory) return false;
+                const thread = await this.codexAcpClient.readSessionHistory(steer.threadId);
+                return thread.id === steer.threadId && thread.turns.some(turn =>
+                    turn.id === steer.turnId && turn.items.some(item =>
+                        item.type === "userMessage" && item.clientId === params.steerId));
+            })().catch(error => {
+                logger.error("Could not reconcile Codex steer history", error);
+                return false;
+            });
+            return await Promise.race([
+                historyApplied,
+                steer.applied.then(() => true),
+                new Promise<false>(resolve => {
+                    timeout = setTimeout(() => resolve(false), 5_000);
+                    timeout.unref?.();
+                }),
+            ]) || steer.acknowledgement !== null;
+        } finally {
+            // Late read results are read-only: never acknowledge after the host
+            // has already received an unknown-delivery error.
+            finished = true;
+            clearTimeout(timeout);
         }
     }
 
@@ -2818,7 +2865,7 @@ export class CodexAcpServer {
         const pending = this.pendingSteers.get(sessionId);
         if (!pending) return;
         for (const [steerId, steer] of pending) {
-            if (steer.activePrompt === activePrompt) pending.delete(steerId);
+            if (steer.activePrompt === activePrompt && !steer.requestPending) pending.delete(steerId);
         }
         if (pending.size === 0) this.pendingSteers.delete(sessionId);
     }
@@ -2834,10 +2881,26 @@ export class CodexAcpServer {
         const pending = this.pendingSteers.get(sessionId);
         if (!pending) return;
         const steer = pending.get(steerId);
-        if (!steer || steer.activePrompt !== activePrompt || steer.turnId !== event.params.turnId) return;
+        if (!steer || steer.activePrompt !== activePrompt
+            || steer.threadId !== event.params.threadId || steer.turnId !== event.params.turnId) return;
+        await this.acknowledgeSteer(sessionId, steerId, steer);
+    }
+
+    private removePendingSteer(sessionId: string, steerId: string, steer: PendingSteer): void {
+        const pending = this.pendingSteers.get(sessionId);
+        if (pending?.get(steerId) !== steer) return;
         pending.delete(steerId);
         if (pending.size === 0) this.pendingSteers.delete(sessionId);
-        await this.connection.notify(CODEX_STEER_APPLIED_METHOD, {sessionId, steerId});
+    }
+
+    private async acknowledgeSteer(sessionId: string, steerId: string, steer: PendingSteer): Promise<void> {
+        if (steer.acknowledgement === null) {
+            steer.acknowledgement = Promise.resolve().then(() =>
+                this.connection.notify(CODEX_STEER_APPLIED_METHOD, {sessionId, steerId}));
+            this.removePendingSteer(sessionId, steerId, steer);
+            steer.resolveApplied();
+        }
+        await steer.acknowledgement;
     }
 
     private cancelBeforeTurnStarted(activePrompt: ActivePrompt): Promise<null> {

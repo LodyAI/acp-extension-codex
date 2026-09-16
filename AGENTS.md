@@ -51,10 +51,17 @@
   remains a separate Core snapshot; do not add a private execution lifecycle protocol.
 - Codex app-server usage: see https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md when touching protocol/transport details, adding or consuming JSON-RPC methods, handling approvals/turn events, or updating generated schema/clients.
 - App-server events: prefer `thread/*`, `turn/*`, and `item/*` event surfaces; avoid the deprecated `codex/event/*` API (planned removal). Keep implementations aligned with generated types in `src/app-server` (including `v2` exports).
-- Steer uses app-server `turn/steer` on the tracked active turn. Correlate `clientUserMessageId` and acknowledge only the matching `item/completed(userMessage)`; never emulate steer with a second `turn/start`.
+- Steer uses app-server `turn/steer` on the tracked active turn. Acknowledge only a
+  matching `item/completed(userMessage)` or persisted user item with the original
+  thread id, turn id, and `clientId = clientUserMessageId`. Retain in-flight identity
+  through prompt completion and bounded error reconciliation; live/history evidence
+  emits one acknowledgement. Never emulate steer with a second `turn/start`.
 - A steering response of `failed` is replay-safe and therefore means the adapter proved the input
   was not applied. Reject unexpected or transport-ambiguous failures so the host preserves an
   unknown-delivery state instead of replaying the input.
+- Turn completion, cancellation, missing history, and history-read failures are not
+  proof of steer non-delivery. Reconciliation reads history once without resuming or
+  resending; it does not provide cross-restart recovery or idempotency.
 - Session fork uses app-server `thread/fork` and installs the returned child as an independent ACP
   session. Agent message updates expose their Codex turn id as `_meta.lody.turnId`;
   `_meta.lody.forkAtTurn.turnId` is passed directly to `thread/fork.lastTurnId`. Do not maintain
