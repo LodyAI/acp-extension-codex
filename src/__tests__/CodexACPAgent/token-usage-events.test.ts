@@ -3,7 +3,7 @@ import type { ServerNotification } from '../../app-server';
 import { createCodexMockTestFixture, createTestSessionState, type CodexMockTestFixture } from '../acp-test-utils';
 import type { TokenUsageBreakdown } from '../../app-server/v2';
 import { ACP_EXT_SESSION_USAGE_UPDATE_METHOD } from '../../AcpExtensions';
-import { toCodexUsageUpdate, CODEX_UNATTRIBUTED_MODEL } from '../../CodexUsage';
+import { CodexTurnUsage } from '../../CodexUsage';
 
 function createTokenUsageNotification(
     sessionId: string,
@@ -24,25 +24,69 @@ function createTokenUsageNotification(
 }
 
 describe('Token Usage Events', () => {
-    it('projects every native snapshot independently, including replay and counter resets', () => {
-        const snapshot = (inputTokens: number) => ({
-            threadId: 's', turnId: 't',
-            tokenUsage: {
-                total: {inputTokens, totalTokens: inputTokens, cachedInputTokens: 0,
-                    cacheWriteInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0},
-                last: {inputTokens: 5, totalTokens: 5, cachedInputTokens: 0,
-                    cacheWriteInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0},
-                modelContextWindow: null,
-            },
-        });
-        const outputs = [1000, 1000, 0, 20].map(value => toCodexUsageUpdate(snapshot(value)));
-        expect(outputs.map(update => update.usage.inputTokens)).toEqual([1000, 1000, 0, 20]);
-        for (const update of outputs) {
-            expect(update.delta).toBeUndefined();
-            expect(update.usage.costUSD).toBeUndefined();
-            expect(update.usage.contextWindow).toBeUndefined();
-            expect(update.modelUsage).toEqual({[CODEX_UNATTRIBUTED_MODEL]: update.usage});
-        }
+    const native = (inputTokens: number): TokenUsageBreakdown => ({
+        inputTokens, totalTokens: inputTokens, cachedInputTokens: 0,
+        cacheWriteInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0,
+    });
+    const snapshot = (turnId: string, total: number, last = total) => ({
+        threadId: 's', turnId,
+        tokenUsage: {total: native(total), last: native(last), modelContextWindow: null},
+    });
+
+    it('attributes only each turn increment and freezes its model, without counting duplicate snapshots', () => {
+        const tracker = new CodexTurnUsage(true);
+        tracker.start('a', 'model-a');
+        const a = tracker.update(snapshot('a', 10000));
+        tracker.start('a', 'changed-mid-turn');
+        expect(tracker.update(snapshot('a', 10000))).toBeUndefined();
+        tracker.start('b', 'model-b');
+        const b = tracker.update(snapshot('b', 12000, 2000));
+        expect(a?.modelUsage).toEqual({'model-a': {
+            inputTokens: 10000, outputTokens: 0, cacheReadInputTokens: 0,
+            cacheCreationInputTokens: 0, reasoningOutputTokens: 0,
+        }});
+        expect(b?.modelUsage).toEqual({'model-b': {
+            inputTokens: 2000, outputTokens: 0, cacheReadInputTokens: 0,
+            cacheCreationInputTokens: 0, reasoningOutputTokens: 0,
+        }});
+        expect([a?._meta.codex.usageTurnId, b?._meta.codex.usageTurnId]).toEqual(['a', 'b']);
+        expect(a?.usage.inputTokens).toBe(10000);
+    });
+
+    it.each([false, true])('excludes resume/fork history with native replay=%s', replay => {
+        const tracker = new CodexTurnUsage(false, replay ? undefined : native(10000));
+        if (replay) expect(tracker.update(snapshot('history', 10000))).toBeUndefined();
+        tracker.start('new', 'model-b');
+        expect(tracker.update(snapshot('new', 10200, 200))?.usage.inputTokens).toBe(200);
+        expect(tracker.update(snapshot('new', 10300, 100))?.usage.inputTokens).toBe(300);
+    });
+
+    it('keeps turn totals across native resets and ignores late previous-turn notifications', () => {
+        const tracker = new CodexTurnUsage();
+        tracker.start('a', 'model-a');
+        tracker.update(snapshot('a', 100));
+        tracker.start('b', 'model-b');
+        expect(tracker.update(snapshot('a', 100))).toBeUndefined();
+        expect(tracker.update(snapshot('b', 150, 50))?.usage.inputTokens).toBe(50);
+        expect(tracker.update(snapshot('b', 0, 0))).toBeUndefined();
+        expect(tracker.update(snapshot('b', 20))?.usage.inputTokens).toBe(70);
+        expect(tracker.update(snapshot('b', 20))).toBeUndefined();
+    });
+
+    it('uses the submitted model across a delayed start and native goal continuations', () => {
+        const tracker = new CodexTurnUsage(true);
+        tracker.prepare('submitted-a');
+        tracker.start('a', 'new-ui-b');
+        expect(Object.keys(tracker.update(snapshot('a', 100))?.modelUsage ?? {})).toEqual(['submitted-a']);
+        tracker.start('continuation', 'new-ui-b');
+        expect(Object.keys(tracker.update(snapshot('continuation', 150))?.modelUsage ?? {})).toEqual(['submitted-a']);
+    });
+
+    it('does not bill a replayed last response when the resume snapshot is missing', () => {
+        const tracker = new CodexTurnUsage();
+        tracker.start('new', 'model-b');
+        expect(tracker.update(snapshot('new', 10000, 1000))).toBeUndefined();
+        expect(tracker.update(snapshot('new', 10200, 200))?.usage.inputTokens).toBe(200);
     });
 
     let mockFixture: CodexMockTestFixture;
@@ -62,6 +106,9 @@ describe('Token Usage Events', () => {
 
             // awaitTurnCompleted sends notifications before resolving
             mockFixture.getCodexAppServerClient().awaitTurnCompleted = vi.fn().mockImplementation(async () => {
+                mockFixture.sendServerNotification({method: 'turn/started', params: {
+                    threadId: sessionId, turn: {id: 'turn-id', items: [], status: 'inProgress', error: null},
+                }});
                 // Send notifications during turn (after handler is registered)
                 for (const notification of notifications) {
                     mockFixture.sendServerNotification(notification);
@@ -72,7 +119,7 @@ describe('Token Usage Events', () => {
                 };
             });
 
-            vi.spyOn(codexAcpAgent, 'getSessionState').mockReturnValue(createTestSessionState({sessionId}));
+            vi.spyOn(codexAcpAgent, 'getSessionState').mockReturnValue(createTestSessionState({sessionId, turnUsage: new CodexTurnUsage(false, native(0))}));
 
             return codexAcpAgent;
         }
@@ -197,6 +244,9 @@ describe('Token Usage Events', () => {
             });
 
             mockFixture.getCodexAppServerClient().awaitTurnCompleted = vi.fn().mockImplementation(async () => {
+                mockFixture.sendServerNotification({method: 'turn/started', params: {
+                    threadId: sessionId, turn: {id: 'turn-id', items: [], status: 'inProgress', error: null},
+                }});
                 for (const notification of notifications) {
                     mockFixture.sendServerNotification(notification);
                 }
@@ -206,7 +256,7 @@ describe('Token Usage Events', () => {
                 };
             });
 
-            vi.spyOn(codexAcpAgent, 'getSessionState').mockReturnValue(createTestSessionState({sessionId}));
+            vi.spyOn(codexAcpAgent, 'getSessionState').mockReturnValue(createTestSessionState({sessionId, turnUsage: new CodexTurnUsage(false, native(0))}));
 
             return async () => {
                 await codexAcpAgent.prompt({
@@ -243,7 +293,7 @@ describe('Token Usage Events', () => {
             await expect(`${JSON.stringify(events[0], null, 2)}\n`).toMatchFileSnapshot('data/token-usage-session-update.json');
         });
 
-        it('should emit session_usage_update ext notification with total token breakdown', async () => {
+        it('should emit turn-scoped usage from native cumulative differences', async () => {
             const events = await setupPromptAndReturnEvents([
                 createTokenUsageNotification(sessionId, {
                     total: {
@@ -280,7 +330,7 @@ describe('Token Usage Events', () => {
                             reasoningOutputTokens: 100,
                             contextWindow: 128000,
                         },
-                        modelUsage: { [CODEX_UNATTRIBUTED_MODEL]: {
+                        modelUsage: { 'model-id': {
                             inputTokens: 3000, outputTokens: 800, cacheReadInputTokens: 1000,
                             cacheCreationInputTokens: 0, reasoningOutputTokens: 100,
                         } },

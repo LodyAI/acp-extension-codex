@@ -60,17 +60,22 @@ rate-limit query, acknowledged steering, goals, subagent/background-task lifecyc
 compaction lifecycle, and history reads. ACP-standard plans, elicitation, session
 forking, and context-window usage stay on their standard protocol paths.
 
-Usage reporting projects Codex's native root-thread cumulative snapshot into
-disjoint token buckets under `codex:unattributed`. It does not attribute totals
-to the selected model, estimate costs, or manufacture a delta. Context-window
-usage remains separate from accounting totals.
+Usage reporting assigns differences between native root-thread token snapshots
+to the model selected for the submitted turn. Cache/input/output/reasoning buckets
+remain disjoint. Each native turn reports its own cumulative totals, tagged with
+notification-local `_meta.codex.usageTurnId`; Lody's matching CLI uses a stable
+per-turn persistence identity so repeated delivery cannot count a turn twice.
 
-Codex owns persistence and restoration of its native counters. The adapter has
-no usage sidecar, baseline, reset cursor, or response-level ledger. It accepts
-native counter resets and inherited resume/fork history without compensation;
-child-thread totals are not added to the root. Accurate historical per-model
-totals and costs are intentionally not provided. Old development sidecar files
-are ignored and are not automatically deleted.
+Only the preceding native snapshot and current turn are held in memory. There is
+no sidecar, historical model ledger or session metadata baseline. Native resume
+snapshots are comparison points, not new usage; when unavailable, the first
+notification is conservatively skipped. Subagents are not summed into the root,
+and native resets, reroutes and crash recovery are best effort rather than exact
+billing. A mid-turn UI selection change applies to the next submitted turn.
+
+The adapter and Lody CLI must be deployed together for turn-scoped usage.
+Unmarked older adapters keep their existing accounting scope. Old development
+sidecars and persisted history are neither read nor automatically migrated.
 
 Codex steering uses `_lody/session/steer` and confirms application with
 `_lody/session/steer_applied`. It keeps the active turn's model, mode, and

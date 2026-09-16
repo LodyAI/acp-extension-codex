@@ -183,6 +183,7 @@ export class CodexAppServerClient {
     private readonly threadGoalUpdateCaptures = new Map<string, Set<(event: ThreadGoalUpdatedNotification) => void>>();
     private readonly threadGoalClearedCaptures = new Map<string, Set<() => void>>();
     private readonly threadSettings = new Map<string, ThreadSettings>();
+    private readonly tokenUsage = new Map<string, import("./app-server/v2").ThreadTokenUsageUpdatedNotification>();
     private readonly staleTurnIds = new Map<string, Set<string>>();
     private turnCompletionTerminalError: Error | null = null;
 
@@ -198,6 +199,9 @@ export class CodexAppServerClient {
         this.connection.onDispose(failPendingTurns);
         this.connection.onUnhandledNotification((data) => {
             const serverNotification = data as ServerNotification;
+            if (serverNotification.method === "thread/tokenUsage/updated") {
+                this.tokenUsage.set(serverNotification.params.threadId, serverNotification.params);
+            }
             if (isMcpServerStatusUpdatedNotification(serverNotification)) {
                 this.mcpServerStartupVersion += 1;
                 this.mcpServerStartupStates.set(serverNotification.params.name, {
@@ -313,6 +317,7 @@ export class CodexAppServerClient {
     }
 
     clearThreadHandlers(threadId: string): void {
+        this.tokenUsage.delete(threadId);
         this.notificationHandlers.delete(threadId);
         this.approvalHandlers.delete(threadId);
         this.elicitationHandlers.delete(threadId);
@@ -607,6 +612,10 @@ export class CodexAppServerClient {
 
     async threadProjectUpdate(params: ThreadProjectUpdateParams): Promise<void> {
         await this.sendRequest({method: "thread/metadata/update", params});
+    }
+
+    getThreadTokenUsage(threadId: string) {
+        return this.tokenUsage.get(threadId);
     }
 
     async threadStart(params: ThreadStartParams & {projectId?: string}): Promise<ThreadStartResponse> {

@@ -33,11 +33,14 @@
 
 ## Docs
 
-- Usage reports project only the root thread's native `thread/tokenUsage/updated`
-  snapshot into disjoint buckets under `codex:unattributed`; no model or price
-  attribution, raw-response accounting, sidecar, baseline, reset cursor, or delta.
-  Native resume/fork totals may include inherited history and counters may reset.
-  Do not compensate these in the adapter or add child thread totals to the root.
+- Usage reports assign native root-thread counter increments to the model frozen
+  from the submitted turn parameters, not the UI model at notification time.
+  Each native turn is a separate accounting lifetime: notification-local
+  `_meta.codex.usageTurnId` lets Lody persist cumulative turn snapshots under
+  a stable turn key. Never sum repeated snapshots or include restored history.
+  Keep only the native snapshot and current turn in memory; no sidecar, session
+  metadata baseline, historical model ledger, raw-response accounting or child totals.
+  If a resume snapshot is missing, anchor the first notification without billing it.
 
 - Manual `/compact` owns the native turn reported by `turn/started` until matching
   `turn/completed`. Cancel sends `turn/interrupt`; a pre-start cancellation waits for
