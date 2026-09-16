@@ -178,6 +178,7 @@ export class CodexAppServerClient {
         reject: (error: Error) => void;
     }>();
     private readonly turnCompletionCaptures = new Map<string, Set<(event: TurnCompletedNotification) => void>>();
+    private readonly turnStartCaptures = new Map<string, Set<(turnId: string) => void>>();
     private readonly turnRoutingCaptures = new Map<string, Set<(turnId: string) => void>>();
     private readonly threadStatusCaptures = new Map<string, Set<(status: ThreadStatus) => void>>();
     private readonly threadGoalUpdateCaptures = new Map<string, Set<(event: ThreadGoalUpdatedNotification) => void>>();
@@ -225,6 +226,7 @@ export class CodexAppServerClient {
                     compact.turnId = serverNotification.params.turn.id;
                     compact.onTurnStarted?.(compact.turnId);
                 }
+                this.recordTurnStarted(serverNotification.params.threadId, serverNotification.params.turn.id);
             }
             if (isThreadStatusChangedNotification(serverNotification)) {
                 this.recordThreadStatusChanged(serverNotification.params);
@@ -361,22 +363,58 @@ export class CodexAppServerClient {
         onTurnStarted?: (turnId: string, threadId: string) => void,
     ): Promise<TurnCompletedNotification> {
         const capturedCompletions: Array<TurnCompletedNotification> = [];
-        const releaseCapture = this.captureTurnCompletions(params.threadId, (event) => {
+        let reviewThreadId: string | null = null;
+        let reviewTurnId: string | null = null;
+        const startedTurnIds = new Set<string>();
+        const completionCaptures: Array<() => void> = [];
+        const startCaptures: Array<() => void> = [];
+        const captureReviewCompletion = (event: TurnCompletedNotification): void => {
             capturedCompletions.push(event);
-        });
+            if (reviewThreadId === null || reviewTurnId === null || event.threadId !== reviewThreadId) {
+                return;
+            }
+            if (!startedTurnIds.has(event.turn.id) || event.turn.id === reviewTurnId) {
+                return;
+            }
+            // The app-server can return one id from review/start and emit a
+            // different native id in turn/started/turn/completed. Treat the
+            // observed id as an alias for this review only.
+            this.resolvePendingTurnCompletion(reviewThreadId, reviewTurnId, event);
+        };
+        const captureReviewStart = (threadId: string) => (turnId: string): void => {
+            if (reviewThreadId !== threadId || reviewTurnId === null || turnId === reviewTurnId) {
+                return;
+            }
+            if (startedTurnIds.has(turnId)) {
+                return;
+            }
+            startedTurnIds.add(turnId);
+            onTurnStarted?.(turnId, threadId);
+        };
+        completionCaptures.push(this.captureTurnCompletions(params.threadId, captureReviewCompletion));
+        startCaptures.push(this.captureTurnStarts(params.threadId, captureReviewStart(params.threadId)));
 
         try {
             const reviewStarted = await this.reviewStart(params);
+            reviewThreadId = reviewStarted.reviewThreadId;
+            reviewTurnId = reviewStarted.turn.id;
+            startedTurnIds.add(reviewTurnId);
             onTurnStarted?.(reviewStarted.turn.id, reviewStarted.reviewThreadId);
-            const earlyCompletion = capturedCompletions.find(event => event.turn.id === reviewStarted.turn.id);
+            if (reviewThreadId !== params.threadId) {
+                completionCaptures.push(this.captureTurnCompletions(reviewThreadId, captureReviewCompletion));
+                startCaptures.push(this.captureTurnStarts(reviewThreadId, captureReviewStart(reviewThreadId)));
+            }
+            const acceptedTurnIds = new Set([reviewTurnId, ...startedTurnIds]);
+            const earlyCompletion = capturedCompletions.find(event =>
+                event.threadId === reviewThreadId && acceptedTurnIds.has(event.turn.id));
             if (earlyCompletion) {
                 return earlyCompletion;
             }
             const completion = this.awaitTurnCompleted(reviewStarted.reviewThreadId, reviewStarted.turn.id);
-            releaseCapture();
             return await completion;
         } finally {
-            releaseCapture();
+            for (const releaseCapture of completionCaptures) releaseCapture();
+            for (const releaseCapture of startCaptures) releaseCapture();
         }
     }
 
@@ -832,11 +870,7 @@ export class CodexAppServerClient {
         const threadResolvers = this.pendingTurnCompletionResolvers.get(event.threadId);
         const entry = threadResolvers?.get(event.turn.id);
         if (entry) {
-            threadResolvers!.delete(event.turn.id);
-            if (threadResolvers!.size === 0) {
-                this.pendingTurnCompletionResolvers.delete(event.threadId);
-            }
-            entry.resolve(event);
+            this.resolvePendingTurnCompletion(event.threadId, event.turn.id, event);
             return;
         }
 
@@ -846,6 +880,30 @@ export class CodexAppServerClient {
         }
         for (const capture of captures) {
             capture(event);
+        }
+    }
+
+    private resolvePendingTurnCompletion(threadId: string, turnId: string, event: TurnCompletedNotification): boolean {
+        const threadResolvers = this.pendingTurnCompletionResolvers.get(threadId);
+        const entry = threadResolvers?.get(turnId);
+        if (!entry) {
+            return false;
+        }
+        threadResolvers!.delete(turnId);
+        if (threadResolvers!.size === 0) {
+            this.pendingTurnCompletionResolvers.delete(threadId);
+        }
+        entry.resolve(event);
+        return true;
+    }
+
+    private recordTurnStarted(threadId: string, turnId: string): void {
+        const captures = this.turnStartCaptures.get(threadId);
+        if (!captures) {
+            return;
+        }
+        for (const capture of captures) {
+            capture(turnId);
         }
     }
 
@@ -974,6 +1032,23 @@ export class CodexAppServerClient {
             captures.delete(capture);
             if (captures.size === 0) {
                 this.turnCompletionCaptures.delete(threadId);
+            }
+        };
+    }
+
+    private captureTurnStarts(threadId: string, capture: (turnId: string) => void): () => void {
+        const captures = this.turnStartCaptures.get(threadId) ?? new Set<(turnId: string) => void>();
+        captures.add(capture);
+        this.turnStartCaptures.set(threadId, captures);
+        let released = false;
+        return () => {
+            if (released) {
+                return;
+            }
+            released = true;
+            captures.delete(capture);
+            if (captures.size === 0) {
+                this.turnStartCaptures.delete(threadId);
             }
         };
     }

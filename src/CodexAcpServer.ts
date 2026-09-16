@@ -263,6 +263,7 @@ interface ActivePrompt {
     cancelSignal: Promise<null>;
     signal: AbortSignal;
     currentTurn: { threadId: string, turnId: string } | null;
+    turnIds: Set<string>;
     hasCompletedTurn: boolean;
     compactionInFlight: boolean;
     requestCancel: () => void;
@@ -2829,6 +2830,7 @@ export class CodexAcpServer {
             cancelSignal,
             signal: abortController.signal,
             currentTurn: null,
+            turnIds: new Set<string>(),
             hasCompletedTurn: false,
             compactionInFlight: false,
             requestCancel: () => {
@@ -2861,6 +2863,19 @@ export class CodexAcpServer {
 
         this.activePrompts.set(sessionId, activePrompt);
         return activePrompt;
+    }
+
+    private setActivePromptTurn(activePrompt: ActivePrompt, turn: { threadId: string, turnId: string }): void {
+        if (activePrompt.currentTurn === null || activePrompt.hasCompletedTurn) {
+            activePrompt.turnIds.clear();
+            activePrompt.hasCompletedTurn = false;
+        }
+        activePrompt.currentTurn = turn;
+        activePrompt.turnIds.add(`${turn.threadId}\u0000${turn.turnId}`);
+    }
+
+    private activePromptTurnMatches(activePrompt: ActivePrompt, turn: { threadId: string, turnId: string }): boolean {
+        return activePrompt.turnIds.has(`${turn.threadId}\u0000${turn.turnId}`);
     }
 
     private clearPendingSteers(sessionId: string, activePrompt: ActivePrompt): void {
@@ -3174,7 +3189,7 @@ export class CodexAcpServer {
                         goalLifecycle.observe(event);
                         if (event.method === "turn/started" && event.params.threadId === params.sessionId) {
                             const turn = {threadId: params.sessionId, turnId: event.params.turn.id};
-                            activePrompt.currentTurn = turn;
+                            this.setActivePromptTurn(activePrompt, turn);
                             if (this.promptShouldStop(params.sessionId, activePrompt)) {
                                 this.interruptLateStartedTurn(turn, activePrompt);
                                 return;
@@ -3184,7 +3199,10 @@ export class CodexAcpServer {
                         }
                         if (event.method === "turn/completed" &&
                             event.params.threadId === params.sessionId &&
-                            activePrompt.currentTurn?.turnId === event.params.turn.id) {
+                            this.activePromptTurnMatches(activePrompt, {
+                                threadId: event.params.threadId,
+                                turnId: event.params.turn.id,
+                            })) {
                             activePrompt.currentTurn = null;
                             activePrompt.hasCompletedTurn = true;
                         }
@@ -3197,7 +3215,10 @@ export class CodexAcpServer {
                     }
                     const completesActiveTurn = event.method === "turn/completed"
                         && event.params.threadId === sessionState.sessionId
-                        && event.params.turn.id === sessionState.currentTurnId;
+                        && this.activePromptTurnMatches(activePrompt, {
+                            threadId: event.params.threadId,
+                            turnId: event.params.turn.id,
+                        });
                     await promptEventHandler.handleNotification(event);
                     if (completesActiveTurn) {
                         // The prompt may remain open for plan approval after its turn has ended. Switch at
@@ -3223,7 +3244,7 @@ export class CodexAcpServer {
                 onTurnStarted: (turnId, threadId) => {
                     const turn = {threadId, turnId};
                     if (threadId === params.sessionId) goalLifecycle.startTurn(turnId);
-                    activePrompt.currentTurn = turn;
+                    this.setActivePromptTurn(activePrompt, turn);
                     if (this.promptShouldStop(params.sessionId, activePrompt)) {
                         this.interruptLateStartedTurn(turn, activePrompt);
                         return;
@@ -3364,7 +3385,7 @@ export class CodexAcpServer {
                             onTurnStarted?.();
                             return;
                         }
-                        activePrompt.currentTurn = turn;
+                        this.setActivePromptTurn(activePrompt, turn);
                         if (this.promptShouldStop(params.sessionId, activePrompt)) {
                             this.interruptLateStartedTurn(turn, activePrompt);
                             return;
@@ -3473,7 +3494,7 @@ export class CodexAcpServer {
                             (turnId) => {
                                 const turn = {threadId: params.sessionId, turnId};
                                 if (!goalLifecycle.startSubmittedTurn(turnId)) return;
-                                activePrompt.currentTurn = turn;
+                                this.setActivePromptTurn(activePrompt, turn);
                                 if (this.promptShouldStop(params.sessionId, activePrompt)) {
                                     this.interruptLateStartedTurn(turn, activePrompt);
                                     return;

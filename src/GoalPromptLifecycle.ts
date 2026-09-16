@@ -10,6 +10,7 @@ import type {TurnCompletedNotification} from "./app-server/v2";
 export class GoalPromptLifecycle {
     private goalActive: boolean;
     private currentTurnId: string | null = null;
+    private readonly currentTurnIds = new Set<string>();
     private completed: TurnCompletedNotification | null = null;
     private failure: Error | null = null;
     private waiter: (() => void) | null = null;
@@ -21,12 +22,15 @@ export class GoalPromptLifecycle {
 
     startTurn(turnId: string): void {
         if (this.currentTurnId === turnId) return;
+        if (this.currentTurnId === null) this.currentTurnIds.clear();
         this.currentTurnId = turnId;
+        this.currentTurnIds.add(turnId);
         this.completed = null;
     }
 
     prepareTurn(): void {
         this.currentTurnId = null;
+        this.currentTurnIds.clear();
         this.completed = null;
     }
 
@@ -54,7 +58,7 @@ export class GoalPromptLifecycle {
 
     private recordCompletion(event: TurnCompletedNotification): void {
         this.completed = event;
-        if (this.currentTurnId === event.turn.id) this.currentTurnId = null;
+        if (this.currentTurnIds.has(event.turn.id)) this.currentTurnId = null;
     }
 
     cancel(): void {
