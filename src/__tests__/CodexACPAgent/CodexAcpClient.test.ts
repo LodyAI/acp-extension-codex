@@ -1797,7 +1797,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(promptResolved).toBe(true);
     });
 
-    it('interrupts a late-started review slash command after the ACP prompt request is cancelled', async () => {
+    it('interrupts the native review turn after cancellation and permits recovery', async () => {
         const { mockFixture } = setupPromptFixture();
         const reviewStart = deferred<ReviewStartResponse>();
         const reviewStartSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "reviewStart")
@@ -1807,10 +1807,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             .mockReturnValue(reviewCompleted.promise);
         const turnInterruptSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "turnInterrupt")
             .mockImplementation(async ({threadId, turnId}) => {
-                reviewCompleted.resolve({
-                    threadId,
-                    turn: createTurn(turnId, "interrupted"),
-                });
+                reviewCompleted.resolve(createReviewCompletedNotification("interrupted"));
             });
         const controller = new AbortController();
 
@@ -1826,15 +1823,28 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         controller.abort();
         await expect(promptPromise).resolves.toMatchObject({stopReason: "cancelled"});
 
-        reviewStart.resolve(createReviewStartResponse("review-thread-id", "review-turn-id"));
+        mockFixture.sendServerNotification({
+            method: "turn/started",
+            params: {threadId: "session-id", turn: createTurn("native-review-turn-id", "inProgress")},
+        });
+        reviewStart.resolve(createReviewStartResponse("session-id", "review-turn-id"));
 
         await vi.waitFor(() => {
             expect(turnInterruptSpy).toHaveBeenCalledWith({
-                threadId: "review-thread-id",
-                turnId: "review-turn-id",
+                threadId: "session-id",
+                turnId: "native-review-turn-id",
             });
         });
-        expect(awaitTurnCompletedSpy).toHaveBeenCalledWith("review-thread-id", "review-turn-id");
+        expect(awaitTurnCompletedSpy).toHaveBeenCalledWith("session-id", "review-turn-id");
+
+        vi.mocked(awaitTurnCompletedSpy).mockResolvedValue({
+            threadId: "session-id",
+            turn: createTurn("turn-id", "completed"),
+        });
+        await expect(mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{type: "text", text: "recovery prompt"}],
+        })).resolves.toMatchObject({stopReason: "end_turn"});
     });
 
     it('returns cancelled when review slash command is interrupted', async () => {

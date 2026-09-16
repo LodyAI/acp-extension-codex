@@ -53,14 +53,6 @@ describe("ACP v1 goal prompt lifecycle", () => {
         await expect(result).resolves.toEqual(completion("b"));
     });
 
-    it("settles when review start and native completion use different turn ids", async () => {
-        const lifecycle = new GoalPromptLifecycle("session", false);
-        lifecycle.startTurn("response-turn");
-        lifecycle.startTurn("native-turn");
-        await expect(lifecycle.waitForCompletion(completion("response-turn", "interrupted")))
-            .resolves.toEqual(completion("response-turn", "interrupted"));
-    });
-
     it.each(["paused", "blocked", "budgetLimited", "usageLimited", "complete"] as const)("releases a between-turn wait when the goal becomes %s", async status => {
         const lifecycle = new GoalPromptLifecycle("session", true);
         const result = lifecycle.waitForCompletion(completion("a"));

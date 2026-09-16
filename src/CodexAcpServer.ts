@@ -263,7 +263,6 @@ interface ActivePrompt {
     cancelSignal: Promise<null>;
     signal: AbortSignal;
     currentTurn: { threadId: string, turnId: string } | null;
-    turnIds: Set<string>;
     hasCompletedTurn: boolean;
     compactionInFlight: boolean;
     requestCancel: () => void;
@@ -2830,7 +2829,6 @@ export class CodexAcpServer {
             cancelSignal,
             signal: abortController.signal,
             currentTurn: null,
-            turnIds: new Set<string>(),
             hasCompletedTurn: false,
             compactionInFlight: false,
             requestCancel: () => {
@@ -2866,16 +2864,8 @@ export class CodexAcpServer {
     }
 
     private setActivePromptTurn(activePrompt: ActivePrompt, turn: { threadId: string, turnId: string }): void {
-        if (activePrompt.currentTurn === null || activePrompt.hasCompletedTurn) {
-            activePrompt.turnIds.clear();
-            activePrompt.hasCompletedTurn = false;
-        }
+        activePrompt.hasCompletedTurn = false;
         activePrompt.currentTurn = turn;
-        activePrompt.turnIds.add(`${turn.threadId}\u0000${turn.turnId}`);
-    }
-
-    private activePromptTurnMatches(activePrompt: ActivePrompt, turn: { threadId: string, turnId: string }): boolean {
-        return activePrompt.turnIds.has(`${turn.threadId}\u0000${turn.turnId}`);
     }
 
     private clearPendingSteers(sessionId: string, activePrompt: ActivePrompt): void {
@@ -3199,10 +3189,8 @@ export class CodexAcpServer {
                         }
                         if (event.method === "turn/completed" &&
                             event.params.threadId === params.sessionId &&
-                            this.activePromptTurnMatches(activePrompt, {
-                                threadId: event.params.threadId,
-                                turnId: event.params.turn.id,
-                            })) {
+                            activePrompt.currentTurn?.threadId === event.params.threadId &&
+                            activePrompt.currentTurn.turnId === event.params.turn.id) {
                             activePrompt.currentTurn = null;
                             activePrompt.hasCompletedTurn = true;
                         }
@@ -3215,10 +3203,8 @@ export class CodexAcpServer {
                     }
                     const completesActiveTurn = event.method === "turn/completed"
                         && event.params.threadId === sessionState.sessionId
-                        && this.activePromptTurnMatches(activePrompt, {
-                            threadId: event.params.threadId,
-                            turnId: event.params.turn.id,
-                        });
+                        && activePrompt.currentTurn?.threadId === event.params.threadId
+                        && activePrompt.currentTurn.turnId === event.params.turn.id;
                     await promptEventHandler.handleNotification(event);
                     if (completesActiveTurn) {
                         // The prompt may remain open for plan approval after its turn has ended. Switch at
@@ -3291,7 +3277,7 @@ export class CodexAcpServer {
                 return cancelledPromptResponse();
             }
             if (commandResult.handled) {
-                if (commandResult.turnCompleted) {
+                if (commandResult.turnCompleted && commandResult.waitForGoalContinuation !== false) {
                     await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
                     const firstCommandTurn = commandResult.turnCompleted;
                     const completed = await this.runWithProcessCheck(() => Promise.race([

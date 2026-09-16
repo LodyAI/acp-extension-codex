@@ -27,7 +27,9 @@ type ParsedSlashCommand = {
 
 export type CommandHandleResult =
     | { handled: false, prompt?: acp.ContentBlock[] }
-    | { handled: true, turnCompleted?: TurnCompletedNotification };
+    // Review completion is authoritative for the standalone command; it must
+    // not be reinterpreted as an active goal continuation by the prompt layer.
+    | { handled: true, turnCompleted?: TurnCompletedNotification, waitForGoalContinuation?: boolean };
 
 /** Codex rejects longer objectives; fail before spending a turn on it. */
 const GOAL_OBJECTIVE_MAX_LENGTH = 4000;
@@ -285,7 +287,7 @@ export class CodexCommands {
             case "review": {
                 const target = this.buildReviewTarget(command.rest);
                 const turnCompleted = await this.runReviewCommand(sessionState, target, options);
-                return { handled: true, turnCompleted };
+                return { handled: true, turnCompleted, waitForGoalContinuation: false };
             }
             case "review-branch": {
                 if (command.rest.length === 0) {
@@ -296,7 +298,7 @@ export class CodexCommands {
                     type: "baseBranch",
                     branch: command.rest,
                 }, options);
-                return { handled: true, turnCompleted };
+                return { handled: true, turnCompleted, waitForGoalContinuation: false };
             }
             case "review-commit": {
                 if (command.rest.length === 0) {
@@ -308,7 +310,7 @@ export class CodexCommands {
                     sha: command.rest,
                     title: null,
                 }, options);
-                return { handled: true, turnCompleted };
+                return { handled: true, turnCompleted, waitForGoalContinuation: false };
             }
             case "status": {
                 await this.refreshRateLimits(sessionState);

@@ -178,7 +178,7 @@ export class CodexAppServerClient {
         reject: (error: Error) => void;
     }>();
     private readonly turnCompletionCaptures = new Map<string, Set<(event: TurnCompletedNotification) => void>>();
-    private readonly turnStartCaptures = new Map<string, Set<(turnId: string) => void>>();
+    private readonly turnStartCaptures = new Set<(threadId: string, turnId: string) => void>();
     private readonly turnRoutingCaptures = new Map<string, Set<(turnId: string) => void>>();
     private readonly threadStatusCaptures = new Map<string, Set<(status: ThreadStatus) => void>>();
     private readonly threadGoalUpdateCaptures = new Map<string, Set<(event: ThreadGoalUpdatedNotification) => void>>();
@@ -365,48 +365,52 @@ export class CodexAppServerClient {
         const capturedCompletions: Array<TurnCompletedNotification> = [];
         let reviewThreadId: string | null = null;
         let reviewTurnId: string | null = null;
-        const startedTurnIds = new Set<string>();
+        const observedTurnStarts: Array<{threadId: string, turnId: string}> = [];
+        const observedTurnStartKeys = new Set<string>();
         const completionCaptures: Array<() => void> = [];
         const startCaptures: Array<() => void> = [];
         const captureReviewCompletion = (event: TurnCompletedNotification): void => {
             capturedCompletions.push(event);
-            if (reviewThreadId === null || reviewTurnId === null || event.threadId !== reviewThreadId) {
-                return;
-            }
-            if (!startedTurnIds.has(event.turn.id) || event.turn.id === reviewTurnId) {
-                return;
-            }
-            // The app-server can return one id from review/start and emit a
-            // different native id in turn/started/turn/completed. Treat the
-            // observed id as an alias for this review only.
-            this.resolvePendingTurnCompletion(reviewThreadId, reviewTurnId, event);
         };
-        const captureReviewStart = (threadId: string) => (turnId: string): void => {
-            if (reviewThreadId !== threadId || reviewTurnId === null || turnId === reviewTurnId) {
+        const captureReviewStart = (threadId: string, turnId: string): void => {
+            const key = `${threadId}\u0000${turnId}`;
+            if (observedTurnStartKeys.has(key)) return;
+            observedTurnStartKeys.add(key);
+            const start = {threadId, turnId};
+            if (reviewThreadId === null) {
+                // review/start can acknowledge after the native turn has
+                // already started. Keep the control handle until the response
+                // identifies the review thread; otherwise Stop cannot target it.
+                observedTurnStarts.push(start);
                 return;
             }
-            if (startedTurnIds.has(turnId)) {
-                return;
+            if (threadId === reviewThreadId && turnId !== reviewTurnId) {
+                onTurnStarted?.(turnId, threadId);
             }
-            startedTurnIds.add(turnId);
-            onTurnStarted?.(turnId, threadId);
         };
         completionCaptures.push(this.captureTurnCompletions(params.threadId, captureReviewCompletion));
-        startCaptures.push(this.captureTurnStarts(params.threadId, captureReviewStart(params.threadId)));
+        // Capture every native start until review/start identifies the review
+        // thread. The caller uses inline delivery today, but the scoped buffer
+        // also covers a response that names a different review thread.
+        startCaptures.push(this.captureTurnStarts(captureReviewStart));
 
         try {
             const reviewStarted = await this.reviewStart(params);
             reviewThreadId = reviewStarted.reviewThreadId;
             reviewTurnId = reviewStarted.turn.id;
-            startedTurnIds.add(reviewTurnId);
-            onTurnStarted?.(reviewStarted.turn.id, reviewStarted.reviewThreadId);
             if (reviewThreadId !== params.threadId) {
                 completionCaptures.push(this.captureTurnCompletions(reviewThreadId, captureReviewCompletion));
-                startCaptures.push(this.captureTurnStarts(reviewThreadId, captureReviewStart(reviewThreadId)));
             }
-            const acceptedTurnIds = new Set([reviewTurnId, ...startedTurnIds]);
+            for (const start of observedTurnStarts) {
+                if (start.threadId === reviewThreadId && start.turnId !== reviewTurnId) {
+                    onTurnStarted?.(start.turnId, start.threadId);
+                }
+            }
+            // review/start's turn is the logical review completion handle. A
+            // different native start is only a control handle for Stop; without
+            // protocol evidence it must not be treated as an alias terminal.
             const earlyCompletion = capturedCompletions.find(event =>
-                event.threadId === reviewThreadId && acceptedTurnIds.has(event.turn.id));
+                event.threadId === reviewThreadId && event.turn.id === reviewTurnId);
             if (earlyCompletion) {
                 return earlyCompletion;
             }
@@ -898,12 +902,8 @@ export class CodexAppServerClient {
     }
 
     private recordTurnStarted(threadId: string, turnId: string): void {
-        const captures = this.turnStartCaptures.get(threadId);
-        if (!captures) {
-            return;
-        }
-        for (const capture of captures) {
-            capture(turnId);
+        for (const capture of this.turnStartCaptures) {
+            capture(threadId, turnId);
         }
     }
 
@@ -1036,20 +1036,15 @@ export class CodexAppServerClient {
         };
     }
 
-    private captureTurnStarts(threadId: string, capture: (turnId: string) => void): () => void {
-        const captures = this.turnStartCaptures.get(threadId) ?? new Set<(turnId: string) => void>();
-        captures.add(capture);
-        this.turnStartCaptures.set(threadId, captures);
+    private captureTurnStarts(capture: (threadId: string, turnId: string) => void): () => void {
+        this.turnStartCaptures.add(capture);
         let released = false;
         return () => {
             if (released) {
                 return;
             }
             released = true;
-            captures.delete(capture);
-            if (captures.size === 0) {
-                this.turnStartCaptures.delete(threadId);
-            }
+            this.turnStartCaptures.delete(capture);
         };
     }
 
