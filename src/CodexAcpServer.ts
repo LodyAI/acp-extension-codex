@@ -55,6 +55,7 @@ import {
 } from "./ModelConfigOption";
 import type {TokenCount} from "./TokenCount";
 import {toPromptUsage} from "./TokenCount";
+import {CodexTurnUsage} from "./CodexUsage";
 import {CodexCommands, GOAL_CONTINUATION_PROMPT, type CommandHandleOptions} from "./CodexCommands";
 import {GoalPromptLifecycle} from "./GoalPromptLifecycle";
 import {SteeringQueue} from "./SteeringQueue";
@@ -160,7 +161,7 @@ import {
 
 
 export interface SessionState {
-    usageAccounting?: import("./CodexUsageAccounting").CodexUsageAccounting;
+    turnUsage?: import("./CodexUsage").CodexTurnUsage;
     sessionId: string,
     currentModelId: string,
     availableModels: Array<Model>,
@@ -790,6 +791,7 @@ export class CodexAcpServer {
             sessionState.cwd,
             () => sessionState.sessionTitleSource,
         );
+        if (operation.kind === "new") sessionState.turnUsage = new CodexTurnUsage(true);
         this.installSessionState(sessionState);
         this.publishRateLimitsAsync(sessionState);
         subscribed = false;
@@ -3136,6 +3138,9 @@ export class CodexAcpServer {
         };
 
         try {
+            sessionState.turnUsage ??= new CodexTurnUsage(false,
+                this.codexAcpClient.appServerClient.getThreadTokenUsage(params.sessionId)?.tokenUsage.total);
+            sessionState.turnUsage.prepare(ModelId.fromString(sessionState.currentModelId).model);
             const promptEventHandler = new CodexEventHandler(
                 this.connection,
                 sessionState,
@@ -3342,6 +3347,7 @@ export class CodexAcpServer {
             sessionState.lastTokenUsage = null;
             ensurePendingTurnStart();
             goalLifecycle.prepareTurn();
+            sessionState.turnUsage.prepare(modelId.model);
             const sendPromptPromise = this.runWithProcessCheck(
                 () => this.codexAcpClient.sendPrompt(
                     effectiveParams,
@@ -3454,6 +3460,7 @@ export class CodexAcpServer {
                     activePrompt.currentTurn = null;
                     sessionState.currentTurnId = null;
                     goalLifecycle.prepareTurn();
+                    sessionState.turnUsage.prepare(modelId.model);
                     const implementationPromise = this.runWithProcessCheck(
                         () => this.codexAcpClient.sendPrompt(
                             implementationRequest,

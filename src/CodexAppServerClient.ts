@@ -183,6 +183,7 @@ export class CodexAppServerClient {
     private readonly threadGoalUpdateCaptures = new Map<string, Set<(event: ThreadGoalUpdatedNotification) => void>>();
     private readonly threadGoalClearedCaptures = new Map<string, Set<() => void>>();
     private readonly threadSettings = new Map<string, ThreadSettings>();
+    private readonly tokenUsage = new Map<string, import("./app-server/v2").ThreadTokenUsageUpdatedNotification>();
     private readonly staleTurnIds = new Map<string, Set<string>>();
     private turnCompletionTerminalError: Error | null = null;
 
@@ -190,13 +191,17 @@ export class CodexAppServerClient {
         this.connection = connection;
         // Process exit disposes the connection (see CodexJsonRpcConnection);
         // fail waiters that only a now-impossible notification could settle.
-        const failPendingTurns = () => this.rejectAllPendingTurnCompletions(
-            new Error("Codex process exited before completing the turn"),
-        );
+        const failPendingTurns = () => {
+            const error = new Error("Codex process exited before completing the turn");
+            this.rejectAllPendingTurnCompletions(error);
+        };
         this.connection.onClose(failPendingTurns);
         this.connection.onDispose(failPendingTurns);
         this.connection.onUnhandledNotification((data) => {
             const serverNotification = data as ServerNotification;
+            if (serverNotification.method === "thread/tokenUsage/updated") {
+                this.tokenUsage.set(serverNotification.params.threadId, serverNotification.params);
+            }
             if (isMcpServerStatusUpdatedNotification(serverNotification)) {
                 this.mcpServerStartupVersion += 1;
                 this.mcpServerStartupStates.set(serverNotification.params.name, {
@@ -312,6 +317,7 @@ export class CodexAppServerClient {
     }
 
     clearThreadHandlers(threadId: string): void {
+        this.tokenUsage.delete(threadId);
         this.notificationHandlers.delete(threadId);
         this.approvalHandlers.delete(threadId);
         this.elicitationHandlers.delete(threadId);
@@ -608,6 +614,10 @@ export class CodexAppServerClient {
         await this.sendRequest({method: "thread/metadata/update", params});
     }
 
+    getThreadTokenUsage(threadId: string) {
+        return this.tokenUsage.get(threadId);
+    }
+
     async threadStart(params: ThreadStartParams & {projectId?: string}): Promise<ThreadStartResponse> {
         return await this.sendRequest({ method: "thread/start", params: params });
     }
@@ -621,7 +631,7 @@ export class CodexAppServerClient {
     }
 
     async threadFork(params: ExperimentalThreadForkParams): Promise<ThreadForkResponse> {
-        return await this.sendRequest({ method: "thread/fork", params: params });
+        return await this.sendRequest({method: "thread/fork", params});
     }
 
     getThreadSettings(threadId: string): ThreadSettings | undefined {

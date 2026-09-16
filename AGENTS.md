@@ -33,10 +33,14 @@
 
 ## Docs
 
-- Usage buckets are disjoint. Native thread totals have no model attribution:
-  emit `codex:unattributed`, never the UI model. Keep the accounting accumulator
-  on SessionState across prompt handlers and context-window fill resets; emitted
-  delta is already included in modelUsage. Resume continuity is not yet durable.
+- Usage reports assign native root-thread counter increments to the model frozen
+  from the submitted turn parameters, not the UI model at notification time.
+  Each native turn is a separate accounting lifetime: notification-local
+  `_meta.codex.usageTurnId` lets Lody persist cumulative turn snapshots under
+  a stable turn key. Never sum repeated snapshots or include restored history.
+  Keep only the native snapshot and current turn in memory; no sidecar, session
+  metadata baseline, historical model ledger, raw-response accounting or child totals.
+  If a resume snapshot is missing, anchor the first notification without billing it.
 
 - Manual `/compact` owns the native turn reported by `turn/started` until matching
   `turn/completed`. Cancel sends `turn/interrupt`; a pre-start cancellation waits for

@@ -21,6 +21,7 @@ describe("CodexAppServerClient turn lifecycle", () => {
         });
         return {
             client,
+            notify: (event: ServerNotification) => notify(event),
             close: () => close(),
             start: (threadId = "thread-1", turnId = "compact-1") => notify({
                 method: "turn/started", params: {threadId, turn: turn(turnId, "inProgress")},
@@ -30,6 +31,12 @@ describe("CodexAppServerClient turn lifecycle", () => {
             }),
         };
     }
+
+    it("completes fork on the response without waiting for accounting replay", async () => {
+        const response = {thread: {id: "child"}};
+        const h = compactHarness(async () => response);
+        await expect(h.client.threadFork({threadId: "parent"})).resolves.toEqual(response);
+    });
 
     it.each(["completed", "interrupted", "failed"] as const)("settles compact from its native %s turn, even before the start ACK", async (status) => {
         let acknowledge: () => void = () => {};
