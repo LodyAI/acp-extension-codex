@@ -1,4 +1,4 @@
-/** Project fields from Codex 0.153.4's experimental schema, omitted by stable generate-ts. */
+/** Project fields from Codex 0.154.0's experimental schema, omitted by stable generate-ts. */
 export type CodexProject = {
     id: string;
     roots: Array<{path: string}>;

@@ -132,7 +132,7 @@ The adapter advertises Core `worktreeProject: { version: 1 }`. Clients can attac
 `_meta.lody.worktreeProject: { version: 1, originProjectPath: "/original/project" }` when
 creating, loading, resuming, or forking a session, while passing the actual
 worktree path as ACP `cwd`. This requires the project APIs in the pinned Codex
-0.153.4 runtime; older `CODEX_PATH` overrides may not support them.
+0.154.0 runtime; older `CODEX_PATH` overrides may not support them.
 
 The adapter canonicalizes the root, reuses a matching Codex project, or creates
 one with a root-derived idempotency key shared by concurrent adapter processes.
