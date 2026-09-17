@@ -129,8 +129,20 @@ Core v1 elicitation retains short headers, question descriptions, optional choic
 fields with `customAnswerFor`, secret flags, and timeouts expressed in seconds.
 A custom answer takes precedence over a selected option and is translated to
 Codex's `["None of the above", "user_note: ..."]` convention. It is not presented
-as an additive note; supporting simultaneous choice and note requires a newer
-Core/client contract.
+as an additive note for legacy clients.
+
+With Core 0.1.6, clients advertising both ACP form elicitation and
+`clientCapabilities._meta.lody.elicitation: { version: 1, answerNotes: true }`
+receive a required choice (including an explicit, nonduplicated "None of the
+above" option) and an optional string property carrying `noteFor`. A selected
+answer and its nonempty note become `["<selected answer>", "user_note: ..."]`
+without replacing the selection. Notes without a selection or with a non-string
+value are ignored; empty notes are omitted. Secret flags, collision-safe field
+keys, short headers, question text, and timeouts retain their Core meanings.
+Missing, malformed, or unsupported capability declarations use the legacy
+`customAnswerFor` flow. Installing Core alone does not enable this capability
+in Lody: the client must implement editing, submission, persistence, and replay
+before advertising support. AIR extensions are unaffected.
 
 Standard ACP tool-call `name` values coexist with Core's provider-neutral image
 generation marker. Plan mode, usage accounting, goal continuations, fork turn IDs,

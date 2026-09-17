@@ -11,6 +11,7 @@ import type {
 import { logger } from "./Logger";
 import type {AcpClientConnection} from "./ACPSessionConnection";
 import {
+    clientSupportsElicitationAnswerNotes,
     clientSupportsFormElicitation,
     clientSupportsUrlElicitation,
 } from "./ElicitationCapabilities";
@@ -394,6 +395,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
     }
 
     private buildUserInputRequest(params: ToolRequestUserInputParams): acp.CreateElicitationRequest {
+        const answerNotes = clientSupportsElicitationAnswerNotes(this.clientCapabilities);
         const properties: Record<string, acp.ElicitationPropertySchema> = {};
         const required: string[] = [];
         const questionIds = new Set(params.questions.map(question => question.id));
@@ -409,7 +411,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
                 description: question.question,
                 _meta: lodyElicitationMeta({secret: question.isSecret}),
             };
-            if (!hasOtherAnswer) required.push(question.id);
+            if (!hasOtherAnswer || answerNotes) required.push(question.id);
             properties[question.id] = hasOptions
                 ? {
                     ...base,
@@ -420,6 +422,11 @@ export class CodexElicitationHandler implements ElicitationHandler {
                             title: option.label,
                             ...(option.description ? { description: option.description } : {}),
                         })),
+                        ...(answerNotes && hasOtherAnswer && !options.some(option => option.label === USER_INPUT_OTHER_OPTION) ? [{
+                            const: USER_INPUT_OTHER_OPTION,
+                            title: USER_INPUT_OTHER_OPTION,
+                            description: "Provide a different answer in the note field.",
+                        }] : []),
                     ],
                 }
                 : {
@@ -429,10 +436,12 @@ export class CodexElicitationHandler implements ElicitationHandler {
             if (hasOtherAnswer) {
                 properties[userInputNoteFieldId(question.id, questionIds)] = {
                     type: "string",
-                    title: "Other",
-                    description: "Type your own answer instead of choosing an option above.",
+                    title: answerNotes ? "Additional answer or note" : "Other",
+                    description: answerNotes
+                        ? "Optionally add context to your selected answer."
+                        : "Type your own answer instead of choosing an option above.",
                     _meta: lodyElicitationMeta({
-                        customAnswerFor: question.id,
+                        ...(answerNotes ? {noteFor: question.id} : {customAnswerFor: question.id}),
                         secret: question.isSecret,
                     }),
                 };
@@ -516,6 +525,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
         }
 
         const answers: ToolRequestUserInputResponse["answers"] = {};
+        const answerNotes = clientSupportsElicitationAnswerNotes(this.clientCapabilities);
         const content = contentRecord(response.content);
         const questionIds = new Set(params.questions.map(question => question.id));
         for (const question of params.questions) {
@@ -526,7 +536,13 @@ export class CodexElicitationHandler implements ElicitationHandler {
             }
             if (question.isOther && question.options != null && question.options.length > 0) {
                 const note = userInputResponseValue(content, userInputNoteFieldId(question.id, questionIds));
-                if (note !== undefined) {
+                if (answerNotes) {
+                    // A note accompanies a choice; never invent or replace that
+                    // choice when a client returns only a note or an invalid value.
+                    if (answerValues.length > 0 && typeof note === "string") {
+                        answerValues.push(`${USER_INPUT_NOTE_PREFIX}${note.trim()}`);
+                    }
+                } else if (note !== undefined) {
                     const notes = Array.isArray(note) ? note : [note];
                     // Core customAnswerFor is an alternative answer, not an
                     // additive note. Translate it to Codex's native Other choice

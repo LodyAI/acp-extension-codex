@@ -1,0 +1,80 @@
+{
+  "method": "createElicitation",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "toolCallId": "request-user-input-1",
+      "mode": "form",
+      "message": "Input requested",
+      "requestedSchema": {
+        "type": "object",
+        "properties": {
+          "next_step": {
+            "title": "Next step",
+            "description": "What should I do next?",
+            "_meta": {
+              "lody": {
+                "elicitation": {
+                  "version": 1,
+                  "secret": true
+                }
+              }
+            },
+            "type": "string",
+            "oneOf": [
+              {
+                "const": "Run tests",
+                "title": "Run tests",
+                "description": "Run the focused suite."
+              },
+              {
+                "const": "None of the above",
+                "title": "None of the above",
+                "description": "Provide a different answer in the note field."
+              }
+            ]
+          },
+          "next_step_note1": {
+            "type": "string",
+            "title": "Additional answer or note",
+            "description": "Optionally add context to your selected answer.",
+            "_meta": {
+              "lody": {
+                "elicitation": {
+                  "version": 1,
+                  "noteFor": "next_step",
+                  "secret": true
+                }
+              }
+            }
+          },
+          "next_step_note": {
+            "title": "Separate",
+            "description": "An independent question?",
+            "_meta": {
+              "lody": {
+                "elicitation": {
+                  "version": 1,
+                  "secret": false
+                }
+              }
+            },
+            "type": "string"
+          }
+        },
+        "required": [
+          "next_step",
+          "next_step_note"
+        ]
+      },
+      "_meta": {
+        "lody": {
+          "elicitation": {
+            "version": 1,
+            "autoResolveAfterSeconds": 60
+          }
+        }
+      }
+    }
+  ]
+}
