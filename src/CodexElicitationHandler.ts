@@ -30,7 +30,9 @@ type AcpBackedMcpElicitationParams = Extract<
     { mode: "form" } | { mode: "url" }
 >;
 
-const USER_INPUT_OTHER_FIELD_SUFFIX = "__other";
+const USER_INPUT_NOTE_FIELD_SUFFIX = "_note";
+const USER_INPUT_OTHER_OPTION = "None of the above";
+const USER_INPUT_NOTE_PREFIX = "user_note: ";
 
 const lodyElicitationMeta = (meta: Omit<LodyElicitationMeta, "version">) => ({
     lody: {elicitation: {version: 1 as const, ...meta}},
@@ -113,17 +115,14 @@ function elicitationResponseMeta(
     return Object.keys(meta).length === 0 ? null : meta;
 }
 
-function userInputOtherFieldId(questionId: string, questionIds: Set<string>): string {
-    const base = `${questionId}${USER_INPUT_OTHER_FIELD_SUFFIX}`;
-    if (!questionIds.has(base)) {
-        return base;
-    }
-
+function userInputNoteFieldId(questionId: string, questionIds: ReadonlySet<string>): string {
+    const base = `${questionId}${USER_INPUT_NOTE_FIELD_SUFFIX}`;
+    let fieldId = base;
     let index = 1;
-    while (questionIds.has(`${base}${index}`)) {
-        index += 1;
+    while (questionIds.has(fieldId)) {
+        fieldId = `${base}${index++}`;
     }
-    return `${base}${index}`;
+    return fieldId;
 }
 
 function userInputResponseValue(
@@ -221,11 +220,29 @@ export class CodexElicitationHandler implements ElicitationHandler {
                 context.isToolApproval,
                 context.persistOptions,
             );
-            if (correlatedCallId !== undefined && result.action === "accept") {
-                await this.connection.notify(acp.methods.client.session.update, {
-                    sessionId: params.threadId,
-                    update: { sessionUpdate: "tool_call_update", toolCallId: correlatedCallId, status: "in_progress" },
-                });
+            if (correlatedCallId !== undefined) {
+                if (result.action === "accept") {
+                    await this.connection.notify(acp.methods.client.session.update, {
+                        sessionId: params.threadId,
+                        update: { sessionUpdate: "tool_call_update", toolCallId: correlatedCallId, status: "in_progress" },
+                    });
+                }
+            } else {
+                try {
+                    await this.connection.notify(acp.methods.client.session.update, {
+                        sessionId: params.threadId,
+                        update: {
+                            sessionUpdate: "tool_call_update",
+                            toolCallId: request.toolCall.toolCallId,
+                            status: "completed",
+                            title: request.toolCall.title,
+                            content: request.toolCall.content,
+                            rawOutput: { action: result.action },
+                        },
+                    });
+                } catch (error) {
+                    logger.error("Failed to finalize standalone MCP elicitation tool call", error);
+                }
             }
             return result;
         } catch (error) {
@@ -386,29 +403,31 @@ export class CodexElicitationHandler implements ElicitationHandler {
             const hasOptions = options.length > 0;
             const hasOtherAnswer = question.isOther && hasOptions;
             const base = {
+                // Core v1 consumers use title as the short header and description
+                // as the question. Keep that presentation contract at the boundary.
                 title: question.header || question.id,
                 description: question.question,
                 _meta: lodyElicitationMeta({secret: question.isSecret}),
             };
-            if (!hasOtherAnswer) {
-                required.push(question.id);
-            }
+            if (!hasOtherAnswer) required.push(question.id);
             properties[question.id] = hasOptions
                 ? {
                     ...base,
                     type: "string",
-                    oneOf: options.map(option => ({
-                        const: option.label,
-                        title: option.label,
-                        description: option.description,
-                    })),
+                    oneOf: [
+                        ...options.map(option => ({
+                            const: option.label,
+                            title: option.label,
+                            ...(option.description ? { description: option.description } : {}),
+                        })),
+                    ],
                 }
                 : {
                     ...base,
                     type: "string",
                 };
             if (hasOtherAnswer) {
-                properties[userInputOtherFieldId(question.id, questionIds)] = {
+                properties[userInputNoteFieldId(question.id, questionIds)] = {
                     type: "string",
                     title: "Other",
                     description: "Type your own answer instead of choosing an option above.",
@@ -500,17 +519,27 @@ export class CodexElicitationHandler implements ElicitationHandler {
         const content = contentRecord(response.content);
         const questionIds = new Set(params.questions.map(question => question.id));
         for (const question of params.questions) {
-            const value = question.isOther && question.options != null && question.options.length > 0
-                ? userInputResponseValue(content, userInputOtherFieldId(question.id, questionIds))
-                    ?? userInputResponseValue(content, question.id)
-                : userInputResponseValue(content, question.id);
-            if (value === undefined) {
+            const answerValues: string[] = [];
+            const value = userInputResponseValue(content, question.id);
+            if (value !== undefined) {
+                answerValues.push(...(Array.isArray(value) ? value.map(String) : [String(value)]));
+            }
+            if (question.isOther && question.options != null && question.options.length > 0) {
+                const note = userInputResponseValue(content, userInputNoteFieldId(question.id, questionIds));
+                if (note !== undefined) {
+                    const notes = Array.isArray(note) ? note : [note];
+                    // Core customAnswerFor is an alternative answer, not an
+                    // additive note. Translate it to Codex's native Other choice
+                    // and note convention, including when a stale choice remains.
+                    answerValues.splice(0, answerValues.length, USER_INPUT_OTHER_OPTION);
+                    answerValues.push(...notes.map(item => `${USER_INPUT_NOTE_PREFIX}${String(item).trim()}`));
+                }
+            }
+            if (answerValues.length === 0) {
                 continue;
             }
             answers[question.id] = {
-                answers: Array.isArray(value)
-                    ? value.map(String)
-                    : [String(value)],
+                answers: answerValues,
             };
         }
         return { answers };

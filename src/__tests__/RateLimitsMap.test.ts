@@ -4,6 +4,7 @@ import {createRateLimitsMap, mergeRateLimitSnapshot} from "../RateLimitsMap";
 
 function snapshot(overrides: Partial<RateLimitSnapshot> = {}): RateLimitSnapshot {
     return {
+        normalModelSlug: null,
         limitId: "codex",
         limitName: "Codex",
         primary: null,
@@ -23,6 +24,7 @@ describe("RateLimitsMap", () => {
         const fast = snapshot({limitId: "fast", limitName: "Fast"});
 
         const result = createRateLimitsMap({
+            ordinaryUsageAllowed: null,
             rateLimits: codex,
             rateLimitsByLimitId: {codex, fast},
             rateLimitResetCredits: null,
@@ -39,6 +41,7 @@ describe("RateLimitsMap", () => {
             secondary: {usedPercent: 20, resetsAt: 150, windowDurationMins: 10080},
             credits: {hasCredits: true, unlimited: false, balance: "10"},
             rateLimitReachedType: "rate_limit_reached",
+            normalModelSlug: "gpt-6-astra",
         });
         const update = snapshot({
             limitId: null,
@@ -52,6 +55,7 @@ describe("RateLimitsMap", () => {
             ...update,
             limitId: "codex",
             credits: previous.credits,
+            normalModelSlug: previous.normalModelSlug,
             secondary: update.secondary,
         });
     });
