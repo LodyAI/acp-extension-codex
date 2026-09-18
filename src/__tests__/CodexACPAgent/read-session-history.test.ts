@@ -3,6 +3,34 @@ import type {Thread} from "../../app-server/v2";
 import {createCodexMockTestFixture} from "../acp-test-utils";
 
 describe("CodexACPAgent - readSessionHistory", () => {
+    it("replays paginated Core history in order without acquiring a live session", async () => {
+        const fixture = createCodexMockTestFixture();
+        const agent = fixture.getCodexAcpAgent();
+        const native = fixture.getCodexAppServerClient();
+        const thread = createHistoryThread();
+        const older = thread.turns[0]!;
+        const newer = {
+            ...older, id: "turn-2",
+            items: [{...older.items[1]!, id: "agent-2", text: "Later answer"}],
+        };
+        const resume = vi.spyOn(native, "threadResume");
+        const start = vi.spyOn(native, "turnStart");
+        vi.spyOn(native, "threadRead").mockResolvedValue({
+            thread: {...thread, historyMode: "paginated", turns: []},
+        });
+        const pages = vi.spyOn(native, "threadTurnsList")
+            .mockResolvedValueOnce({data: [newer], nextCursor: "older", backwardsCursor: null})
+            .mockResolvedValueOnce({data: [older], nextCursor: null, backwardsCursor: null});
+
+        await expect(agent.readSessionHistory({sessionId: thread.id})).resolves.toEqual({});
+
+        expect(pages).toHaveBeenCalledTimes(2);
+        expect(resume).not.toHaveBeenCalled();
+        expect(start).not.toHaveBeenCalled();
+        expect(() => agent.getSessionState(thread.id)).toThrow("Session session-1 not found");
+        await expect(fixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/lody-paginated-history.json");
+    });
+
     it("reads and projects history without resuming or installing the session", async () => {
         const fixture = createCodexMockTestFixture();
         const agent = fixture.getCodexAcpAgent();
@@ -15,7 +43,7 @@ describe("CodexACPAgent - readSessionHistory", () => {
 
         await expect(agent.readSessionHistory({sessionId: "session-1"})).resolves.toEqual({});
 
-        expect(threadRead).toHaveBeenCalledOnce();
+        expect(threadRead).toHaveBeenCalledTimes(2);
         expect(threadRead).toHaveBeenCalledWith({
             threadId: "session-1",
             includeTurns: true,
@@ -93,6 +121,7 @@ function createHistoryThread(): Thread {
         cliVersion: "0.0.0",
         source: "cli",
         threadSource: null,
+        originator: null,
         agentNickname: null,
         agentRole: null,
         gitInfo: null,

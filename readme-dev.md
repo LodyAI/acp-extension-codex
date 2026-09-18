@@ -104,7 +104,9 @@ Codex translates Core’s boolean `plan_mode` option to its native default/plan 
 
 After a failed `turn/steer` response, the adapter keeps the original thread id,
 turn id, and steer id while draining received notifications. Unless Codex explicitly
-refused the steer, it then reads `thread/read(includeTurns: true)` once. A matching
+refused the steer, it then performs one history lookup: metadata via `thread/read`,
+followed by `thread/turns/list` pages for paginated stores, or
+`thread/read(includeTurns: true)` for legacy stores. A matching
 `userMessage.clientId` in the original turn emits the same applied notification as
 the live event, at most once. Normal successful responses retain the existing live
 notification path.
@@ -116,3 +118,37 @@ non-delivery. Without positive evidence, an ambiguous response still rejects the
 request so the host preserves `unknown`. Late read results cannot acknowledge after
 that verdict. No steer retry, new turn, session resume, or cross-restart recovery is
 performed. See [the protocol](https://learn.chatgpt.com/docs/app-server#read-a-stored-thread-without-resuming).
+
+## Codex 0.154 compatibility
+
+The Core session-history endpoint and steer reconciliation use the same read-only
+history reader as session loading. Paging never resumes a thread or replays input.
+Loading uses the resume cursor to separate stored history from live events.
+
+Core v1 elicitation retains short headers, question descriptions, optional choice
+fields with `customAnswerFor`, secret flags, and timeouts expressed in seconds.
+A custom answer takes precedence over a selected option and is translated to
+Codex's `["None of the above", "user_note: ..."]` convention. It is not presented
+as an additive note for legacy clients.
+
+With Core 0.1.6, clients advertising both ACP form elicitation and
+`clientCapabilities._meta.lody.elicitation: { version: 1, answerNotes: true }`
+receive a required choice (including an explicit, nonduplicated "None of the
+above" option) and an optional string property carrying `noteFor`. A selected
+answer and its nonempty note become `["<selected answer>", "user_note: ..."]`
+without replacing the selection. Notes without a selection or with a non-string
+value are ignored; empty notes are omitted. Secret flags, collision-safe field
+keys, short headers, question text, and timeouts retain their Core meanings.
+Missing, malformed, or unsupported capability declarations use the legacy
+`customAnswerFor` flow. Installing Core alone does not enable this capability
+in Lody: the client must implement editing, submission, persistence, and replay
+before advertising support. AIR extensions are unaffected.
+
+Standard ACP tool-call `name` values coexist with Core's provider-neutral image
+generation marker. Plan mode, usage accounting, goal continuations, fork turn IDs,
+worktree project ownership, and structured notices retain their Core contracts.
+
+### AIR diff statistics
+
+See the [diff statistics specification](docs/diff-statistics-extension.md) for the
+`_meta.jetbrains.air.diffStats` payload and its compatibility rules.

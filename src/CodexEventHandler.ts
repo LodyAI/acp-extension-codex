@@ -69,6 +69,7 @@ import {
     fuzzyFileSearchToolCallId,
 } from "./CodexToolCallMapper";
 import { stripShellPrefix } from "./CommandUtils";
+import {commandToolName, functionToolName} from "./ToolCallName";
 import {createTerminalOutputMeta, type TerminalOutputMode} from "./TerminalOutputMode";
 import {ReasoningSummaryFilter, sanitizeReasoningParts} from "./ReasoningText";
 import {
@@ -91,6 +92,7 @@ import {
 import {CodexSubagentEventRouter} from "./subagents/CodexSubagentEventRouter";
 import type {SubagentState} from "./subagents/AcpSubagents";
 import {mergeRateLimitSnapshot} from "./RateLimitsMap";
+import {AGENT_FILE_CHANGE_REPORT_MAX_DIFF_BYTES} from "./AgentFileChangeReport";
 
 const PROVIDER_ERROR_TEXT_MAX_CHARS = 4_096;
 const INTERNAL_INSTRUCTION_MARKERS = [
@@ -255,6 +257,9 @@ export class CodexEventHandler {
     private readonly terminalCommandIds = new Set<string>();
     private readonly terminalCommandOutputIds = new Set<string>();
     private readonly agentMessagePhases = new Map<string, string | null>();
+    private readonly turnDiffs = new Map<string, string>();
+    private readonly oversizedTurnDiffs = new Set<string>();
+    private readonly collectTurnDiffs: boolean;
     private readonly subagents: CodexSubagentEventRouter;
     /** Connection-level `authStatus` sink; the app-server account push feeds it. */
     private readonly onAccountUpdated: ((notification: AccountUpdatedNotification) => void) | undefined;
@@ -271,6 +276,7 @@ export class CodexEventHandler {
             new ACPSessionConnection(connection, sessionState.sessionId),
         ),
         onAccountUpdated?: (notification: AccountUpdatedNotification) => void,
+        collectTurnDiffs = false,
     ) {
         this.connection = connection;
         this.onAccountUpdated = onAccountUpdated;
@@ -280,6 +286,7 @@ export class CodexEventHandler {
         this.sessionFailureEpoch = sessionFailureEpoch;
         this.session = new ACPSessionConnection(connection, sessionState.sessionId);
         this.subagents = subagents;
+        this.collectTurnDiffs = collectTurnDiffs;
         if (sessionState.sessionFailure !== undefined) {
             this.failuresById.set(sessionState.sessionFailure.id, sessionState.sessionFailure);
         }
@@ -287,6 +294,14 @@ export class CodexEventHandler {
 
     getFailure(): RequestError | null {
         return this.failure;
+    }
+
+    getTurnDiff(turnId: string): string {
+        return this.turnDiffs.get(turnId) ?? "";
+    }
+
+    isTurnDiffOversized(turnId: string): boolean {
+        return this.oversizedTurnDiffs.has(turnId);
     }
 
     getTerminalSessionFailureMeta(
@@ -493,6 +508,8 @@ export class CodexEventHandler {
         this.pendingPlanItemIds.clear();
         this.planDeltaTextByItemId.clear();
         this.lastEmittedPlanTextByItemId.clear();
+        this.turnDiffs.clear();
+        this.oversizedTurnDiffs.clear();
     }
 
     private async createUpdateEvent(notification: ServerNotification): Promise<UpdateSessionEvent | null> {
@@ -519,6 +536,22 @@ export class CodexEventHandler {
             case "turn/plan/updated":
                 this.completeRetryIncidentOnTurnProgress();
                 return await this.updatePlan(notification.params);
+            case "turn/diff/updated":
+                if (notification.params.threadId === this.sessionState.sessionId) {
+                    this.completeRetryIncidentOnTurnProgress();
+                    if (!this.disposed && this.collectTurnDiffs) {
+                        if (Buffer.byteLength(notification.params.diff, "utf8") > AGENT_FILE_CHANGE_REPORT_MAX_DIFF_BYTES) {
+                            this.turnDiffs.delete(notification.params.turnId);
+                            this.oversizedTurnDiffs.add(notification.params.turnId);
+                        } else {
+                            // Codex 0.154 emits an empty snapshot when its tracker transitions
+                            // from a non-empty aggregate to no diff, which clears stale state here.
+                            this.oversizedTurnDiffs.delete(notification.params.turnId);
+                            this.turnDiffs.set(notification.params.turnId, notification.params.diff);
+                        }
+                    }
+                }
+                return null;
             case "error":
                 return await this.createErrorEvent(notification.params);
             case "turn/started":
@@ -624,7 +657,6 @@ export class CodexEventHandler {
             case "command/exec/outputDelta":
             case "hook/started":
             case "hook/completed":
-            case "turn/diff/updated":
             case "turn/moderationMetadata":
             case "item/fileChange/outputDelta":
             case "item/fileChange/patchUpdated":
@@ -873,10 +905,16 @@ export class CodexEventHandler {
     private async completeItemEvent(event: ItemCompletedNotification): Promise<UpdateSessionEvent | null> {
         switch (event.item.type) {
             case "fileChange":
+                return {
+                    sessionUpdate: "tool_call_update",
+                    toolCallId: event.item.id,
+                    status: event.item.status === "completed" ? "completed" : "failed",
+                }
             case "dynamicToolCall":
                 return {
                     sessionUpdate: "tool_call_update",
                     toolCallId: event.item.id,
+                    name: functionToolName(event.item.tool, event.item.namespace),
                     status: event.item.status === "completed" ? "completed" : "failed",
                 }
             case "mcpToolCall":
@@ -1116,9 +1154,11 @@ export class CodexEventHandler {
     }
 
     private completeCommandExecutionEvent(item: ThreadItem & { "type": "commandExecution" }): UpdateSessionEvent {
+        const name = commandToolName(item.source);
         const update: UpdateSessionEvent = {
             sessionUpdate: "tool_call_update",
             toolCallId: item.id,
+            ...(name === undefined ? {} : {name}),
             status: item.status === "completed" ? "completed" : "failed",
             rawOutput: {
                 formatted_output: item.aggregatedOutput ?? "",
@@ -1465,6 +1505,7 @@ export class CodexEventHandler {
                 : {
                     limitId: rateLimits.limitId ?? existing.limitId,
                     limitName: rateLimits.limitName ?? existing.limitName,
+                    normalModelSlug: rateLimits.normalModelSlug ?? existing.normalModelSlug,
                     primary: rateLimits.primary ?? existing.primary,
                     secondary: rateLimits.secondary ?? existing.secondary,
                     credits: rateLimits.credits ?? existing.credits,

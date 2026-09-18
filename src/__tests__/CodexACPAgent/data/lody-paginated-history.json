@@ -1,0 +1,75 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "session-1",
+      "update": {
+        "sessionUpdate": "session_info_update",
+        "title": "Imported conversation",
+        "_meta": {
+          "lody": {
+            "titleSource": "explicit"
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "session-1",
+      "update": {
+        "sessionUpdate": "user_message_chunk",
+        "messageId": "user-1",
+        "content": {
+          "type": "text",
+          "text": "Hello"
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "session-1",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "messageId": "agent-1",
+        "content": {
+          "type": "text",
+          "text": "Hi there"
+        },
+        "_meta": {
+          "lody": {
+            "turnId": "turn-1"
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "session-1",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "messageId": "agent-2",
+        "content": {
+          "type": "text",
+          "text": "Later answer"
+        },
+        "_meta": {
+          "lody": {
+            "turnId": "turn-2"
+          }
+        }
+      }
+    }
+  ]
+}

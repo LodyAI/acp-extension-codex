@@ -26,7 +26,7 @@ function historyThread(overrides: Partial<Thread> = {}): Thread {
         reasoningEffort: null, createdAt: 1, updatedAt: 2, recencyAt: null,
         status: {type: "idle"}, path: null, cwd: "/repo", cliVersion: "0.153.4",
         source: "appServer", threadSource: null, agentNickname: null, agentRole: null,
-        gitInfo: null, name: null,
+        gitInfo: null, name: null, originator: null,
         turns: [{
             id: "turn-id", items: [steeredItem], itemsView: "full", status: "completed",
             error: null, startedAt: null, completedAt: null, durationMs: null,
@@ -87,6 +87,34 @@ async function startPendingSteer() {
 
 describe("CodexACPAgent - steer", () => {
     afterEach(() => vi.useRealTimers());
+
+    it.each([false, true])("reconciles paginated history with later-page failure %s without replaying steer", async (failLaterPage) => {
+        const test = await startPendingSteer();
+        const thread = historyThread({historyMode: "paginated"});
+        vi.spyOn(test.appServer, "threadRead").mockResolvedValue({
+            thread: {...thread, turns: []},
+        });
+        const pages = vi.spyOn(test.appServer, "threadTurnsList")
+            .mockResolvedValueOnce({
+                data: [{...thread.turns[0]!, id: "newer-turn", items: []}],
+                nextCursor: "older", backwardsCursor: null,
+            });
+        if (failLaterPage) pages.mockRejectedValueOnce(new Error("page unavailable"));
+        else pages.mockResolvedValueOnce({
+            data: thread.turns, nextCursor: null, backwardsCursor: null,
+        });
+        const resume = vi.spyOn(test.appServer, "threadResume");
+        await test.finishTurn();
+        test.steerResponse.reject(new Error("lost steer response"));
+
+        if (failLaterPage) await expect(test.request).rejects.toThrow("lost steer response");
+        else await expect(test.request).resolves.toEqual({outcome: "injected"});
+        expect(test.appliedNotifications()).toHaveLength(failLaterPage ? 0 : 1);
+        expect(pages).toHaveBeenCalledTimes(2);
+        expect(resume).not.toHaveBeenCalled();
+        expect(test.turnStartSpy).toHaveBeenCalledOnce();
+        expect(test.turnSteerSpy).toHaveBeenCalledOnce();
+    });
 
     it("reconciles a lost response from persisted identity after the original prompt has closed", async () => {
         const test = await startPendingSteer();
