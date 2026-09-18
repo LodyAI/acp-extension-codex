@@ -404,18 +404,15 @@ export class CodexElicitationHandler implements ElicitationHandler {
             const options = question.options ?? [];
             const hasOptions = options.length > 0;
             const hasOtherAnswer = question.isOther && hasOptions;
-            const base = {
+            if (!hasOtherAnswer || answerNotes) required.push(question.id);
+            properties[question.id] = {
                 // Core v1 consumers use title as the short header and description
                 // as the question. Keep that presentation contract at the boundary.
                 title: question.header || question.id,
                 description: question.question,
                 _meta: lodyElicitationMeta({secret: question.isSecret}),
-            };
-            if (!hasOtherAnswer || answerNotes) required.push(question.id);
-            properties[question.id] = hasOptions
-                ? {
-                    ...base,
-                    type: "string",
+                type: "string",
+                ...(hasOptions ? {
                     oneOf: [
                         ...options.map(option => ({
                             const: option.label,
@@ -428,11 +425,8 @@ export class CodexElicitationHandler implements ElicitationHandler {
                             description: "Provide a different answer in the note field.",
                         }] : []),
                     ],
-                }
-                : {
-                    ...base,
-                    type: "string",
-                };
+                } : {}),
+            };
             if (hasOtherAnswer) {
                 properties[userInputNoteFieldId(question.id, questionIds)] = {
                     type: "string",
