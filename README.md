@@ -64,6 +64,15 @@ Codex steering uses `_lody/session/steer` and confirms application with
 `_lody/session/steer_applied`. It keeps the active turn's model, mode, and
 configuration; slash commands cannot be steered.
 
+Acknowledged steering is inject-or-refuse. When no turn can accept input, the
+adapter rejects with JSON-RPC `invalid request` (`-32600`), proving that the
+message was not delivered. Lody requeues that same message as an ordinary
+`session/prompt` after the current prompt finishes; the adapter never starts a
+detached replacement turn. Only a proven refusal permits automatic retry:
+`failed`, internal errors, and transport failures remain ambiguous, even if the
+target turn ended meanwhile. `injected` is submission, not application; only
+the correlated `steer_applied` notification transfers logical output ownership.
+
 ## Runtime options
 
 - `CODEX_API_KEY` - API key used when the API-key auth method is selected. Takes precedence over `OPENAI_API_KEY`.

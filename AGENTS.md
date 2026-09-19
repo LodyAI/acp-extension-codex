@@ -47,6 +47,10 @@
 - Codex app-server usage: see https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md when touching protocol/transport details, adding or consuming JSON-RPC methods, handling approvals/turn events, or updating generated schema/clients.
 - App-server events: prefer `thread/*`, `turn/*`, and `item/*` event surfaces; avoid the deprecated `codex/event/*` API (planned removal). Keep implementations aligned with generated types in `src/app-server` (including `v2` exports).
 - Steer uses app-server `turn/steer` on the tracked active turn. Correlate `clientUserMessageId` and acknowledge only the matching `item/completed(userMessage)`; never emulate steer with a second `turn/start`.
+- Acknowledged steer is inject-or-refuse: JSON-RPC `invalid request` (`-32600`)
+  proves non-delivery and lets Lody requeue the same message as a normal prompt.
+  No active turn is a refusal; a transport/internal failure is not, even when the
+  target turn ended meanwhile. Never authorize automatic retry from that race.
 - Session fork uses app-server `thread/fork` and installs the returned child as an independent ACP
   session. Agent message updates expose their Codex turn id as `_meta.lody.turnId`;
   `_meta.lody.forkAtTurn.turnId` is passed directly to `thread/fork.lastTurnId`. Do not maintain

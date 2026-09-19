@@ -1693,13 +1693,13 @@ export class CodexAcpServer {
 
         const turnId = await this.getSteerableTurnId(sessionState);
         if (turnId) {
-            const injected = await this.injectSteerIntoActiveTurn(params, turnId, sessionState);
+            const injected = await this.injectSteerIntoActiveTurn(params, turnId);
             if (injected) {
                 logger.log("Steering session injected", {sessionId: params.sessionId, turnId});
                 return {outcome: "injected"};
             }
         }
-        return {outcome: "failed"};
+        throw RequestError.invalidRequest("No active Codex turn to steer");
     }
 
     /**
@@ -1716,10 +1716,8 @@ export class CodexAcpServer {
     /**
      * Attempts to inject the prompt into the given running turn.
      *
-     * A failed injection is fatal only when the turn is still the session's
-     * current turn and Codex reported something other than "no active turn to
-     * steer". Otherwise the turn has already ended underneath us and steering
-     * reports a failed delivery.
+     * Only an explicit native refusal proves non-delivery. A turn ending while
+     * an RPC fails does not: Codex may have consumed the input before the error.
      *
      * @returns true when the prompt was injected; false when the target turn
      *     already ended.
@@ -1727,7 +1725,6 @@ export class CodexAcpServer {
     private async injectSteerIntoActiveTurn(
         params: SessionSteerRequest,
         turnId: string,
-        sessionState: SessionState,
     ): Promise<boolean> {
         const activePrompt = this.activePrompts.get(params.sessionId);
         const activeTurn = activePrompt?.currentTurn;
@@ -1771,8 +1768,7 @@ export class CodexAcpServer {
                 if (pending.size === 0) this.pendingSteers.delete(params.sessionId);
             }
             await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
-            const turnStillActive = sessionState.currentTurnId === turnId;
-            if (turnStillActive && !this.isNoActiveTurnToSteerError(err)) {
+            if (!this.isNoActiveTurnToSteerError(err)) {
                 throw err;
             }
             return false;
