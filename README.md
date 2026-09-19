@@ -82,6 +82,11 @@ Codex steering uses `_lody/session/steer` and confirms application with
 `_lody/session/steer_applied`. It keeps the active turn's model, mode, and
 configuration; slash commands cannot be steered.
 
+Review commands and manual `/compact` retain the ACP prompt during cancellation
+until native completion or connection closure. Cancellation during startup waits
+for the native turn id before interrupting it; an interrupt acknowledgement alone
+does not allow another prompt to start.
+
 ## Runtime options
 
 - `CODEX_API_KEY` - API key used when the API-key auth method is selected. Takes precedence over `OPENAI_API_KEY`.

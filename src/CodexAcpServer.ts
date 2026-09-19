@@ -270,7 +270,7 @@ interface ActivePrompt {
     signal: AbortSignal;
     currentTurn: { threadId: string, turnId: string } | null;
     hasCompletedTurn: boolean;
-    compactionInFlight: boolean;
+    nativeCommandInFlight: boolean;
     requestCancel: () => void;
     requestClose: () => void;
     complete: () => void;
@@ -2834,7 +2834,7 @@ export class CodexAcpServer {
             signal: abortController.signal,
             currentTurn: null,
             hasCompletedTurn: false,
-            compactionInFlight: false,
+            nativeCommandInFlight: false,
             requestCancel: () => {
                 if (abortController.signal.aborted) {
                     return;
@@ -2865,6 +2865,11 @@ export class CodexAcpServer {
 
         this.activePrompts.set(sessionId, activePrompt);
         return activePrompt;
+    }
+
+    private setActivePromptTurn(activePrompt: ActivePrompt, turn: { threadId: string, turnId: string }): void {
+        activePrompt.hasCompletedTurn = false;
+        activePrompt.currentTurn = turn;
     }
 
     private clearPendingSteers(sessionId: string, activePrompt: ActivePrompt): void {
@@ -2911,7 +2916,7 @@ export class CodexAcpServer {
 
     private cancelBeforeTurnStarted(activePrompt: ActivePrompt): Promise<null> {
         return activePrompt.cancelSignal.then(() => {
-            if (activePrompt.currentTurn === null && !activePrompt.compactionInFlight) {
+            if (activePrompt.currentTurn === null && !activePrompt.nativeCommandInFlight) {
                 return null;
             }
             return new Promise<null>(() => {});
@@ -2994,9 +2999,9 @@ export class CodexAcpServer {
     }
 
     private interruptLateStartedTurn(turn: { threadId: string, turnId: string }, activePrompt: ActivePrompt): void {
-        if (activePrompt.compactionInFlight) {
+        if (activePrompt.nativeCommandInFlight) {
             this.codexAcpClient.markTurnStale(turn);
-            // Interrupt acknowledgement cannot settle a submitted compaction.
+            // Interrupt acknowledgement cannot settle a submitted native command.
             void this.requestTurnInterrupt(turn, "Cancel");
             return;
         }
@@ -3182,7 +3187,7 @@ export class CodexAcpServer {
                         goalLifecycle.observe(event);
                         if (event.method === "turn/started" && event.params.threadId === params.sessionId) {
                             const turn = {threadId: params.sessionId, turnId: event.params.turn.id};
-                            activePrompt.currentTurn = turn;
+                            this.setActivePromptTurn(activePrompt, turn);
                             if (this.promptShouldStop(params.sessionId, activePrompt)) {
                                 this.interruptLateStartedTurn(turn, activePrompt);
                                 return;
@@ -3192,7 +3197,8 @@ export class CodexAcpServer {
                         }
                         if (event.method === "turn/completed" &&
                             event.params.threadId === params.sessionId &&
-                            activePrompt.currentTurn?.turnId === event.params.turn.id) {
+                            activePrompt.currentTurn?.threadId === event.params.threadId &&
+                            activePrompt.currentTurn.turnId === event.params.turn.id) {
                             activePrompt.currentTurn = null;
                             activePrompt.hasCompletedTurn = true;
                         }
@@ -3205,7 +3211,8 @@ export class CodexAcpServer {
                     }
                     const completesActiveTurn = event.method === "turn/completed"
                         && event.params.threadId === sessionState.sessionId
-                        && event.params.turn.id === sessionState.currentTurnId;
+                        && activePrompt.currentTurn?.threadId === event.params.threadId
+                        && activePrompt.currentTurn.turnId === event.params.turn.id;
                     await promptEventHandler.handleNotification(event);
                     if (completesActiveTurn) {
                         // The prompt may remain open for plan approval after its turn has ended. Switch at
@@ -3231,7 +3238,7 @@ export class CodexAcpServer {
                 onTurnStarted: (turnId, threadId) => {
                     const turn = {threadId, turnId};
                     if (threadId === params.sessionId) goalLifecycle.startTurn(turnId);
-                    activePrompt.currentTurn = turn;
+                    this.setActivePromptTurn(activePrompt, turn);
                     if (this.promptShouldStop(params.sessionId, activePrompt)) {
                         this.interruptLateStartedTurn(turn, activePrompt);
                         return;
@@ -3240,11 +3247,11 @@ export class CodexAcpServer {
                     pendingTurnStart?.resolve(turnId);
                     onTurnStarted?.();
                 },
-                onCompactionStarted: () => {
-                    activePrompt.compactionInFlight = true;
+                onNativeCommandStarted: () => {
+                    activePrompt.nativeCommandInFlight = true;
                 },
-                onCompactionFinished: () => {
-                    activePrompt.compactionInFlight = false;
+                onNativeCommandFinished: () => {
+                    activePrompt.nativeCommandInFlight = false;
                 },
                 setConfigOption: async (configId, value) => {
                     await this.applySessionConfigOption(sessionState, {
@@ -3278,7 +3285,7 @@ export class CodexAcpServer {
                 return cancelledPromptResponse();
             }
             if (commandResult.handled) {
-                if (commandResult.turnCompleted) {
+                if (commandResult.turnCompleted && commandResult.waitForGoalContinuation !== false) {
                     await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
                     const firstCommandTurn = commandResult.turnCompleted;
                     const completed = await this.runWithProcessCheck(() => Promise.race([
@@ -3372,7 +3379,7 @@ export class CodexAcpServer {
                             onTurnStarted?.();
                             return;
                         }
-                        activePrompt.currentTurn = turn;
+                        this.setActivePromptTurn(activePrompt, turn);
                         if (this.promptShouldStop(params.sessionId, activePrompt)) {
                             this.interruptLateStartedTurn(turn, activePrompt);
                             return;
@@ -3481,7 +3488,7 @@ export class CodexAcpServer {
                             (turnId) => {
                                 const turn = {threadId: params.sessionId, turnId};
                                 if (!goalLifecycle.startSubmittedTurn(turnId)) return;
-                                activePrompt.currentTurn = turn;
+                                this.setActivePromptTurn(activePrompt, turn);
                                 if (this.promptShouldStop(params.sessionId, activePrompt)) {
                                     this.interruptLateStartedTurn(turn, activePrompt);
                                     return;
@@ -3788,9 +3795,9 @@ export class CodexAcpServer {
         }
 
         const activePrompt = this.activePrompts.get(params.sessionId);
-        if (activePrompt?.compactionInFlight) {
+        if (activePrompt?.nativeCommandInFlight) {
             activePrompt.requestCancel();
-            // A submitted compact owns the prompt before its native turn arrives.
+            // A submitted native command owns the prompt before its turn id arrives.
             // The turn-start callback interrupts it when the id becomes available.
             if (activePrompt.currentTurn === null) return;
         }

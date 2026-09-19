@@ -1804,44 +1804,127 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(promptResolved).toBe(true);
     });
 
-    it('interrupts a late-started review slash command after the ACP prompt request is cancelled', async () => {
-        const { mockFixture } = setupPromptFixture();
-        const reviewStart = deferred<ReviewStartResponse>();
-        const reviewStartSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "reviewStart")
-            .mockReturnValue(reviewStart.promise);
-        const reviewCompleted = deferred<TurnCompletedNotification>();
-        const awaitTurnCompletedSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "awaitTurnCompleted")
-            .mockReturnValue(reviewCompleted.promise);
-        const turnInterruptSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "turnInterrupt")
-            .mockImplementation(async ({threadId, turnId}) => {
-                reviewCompleted.resolve({
-                    threadId,
-                    turn: createTurn(turnId, "interrupted"),
-                });
-            });
+    it.each([
+        {source: "stop", phase: "before-response"},
+        {source: "stop", phase: "after-response"},
+        {source: "stop", phase: "after-start"},
+        {source: "stop", phase: "start-before-response"},
+        {source: "request-abort", phase: "before-response"},
+        {source: "request-abort", phase: "after-response"},
+        {source: "request-abort", phase: "after-start"},
+        {source: "request-abort", phase: "start-before-response"},
+    ])('retains review ownership through $source at $phase until authoritative completion', async ({source, phase}) => {
+        const {mockFixture, sessionState} = setupPromptFixture();
+        const appClient = mockFixture.getCodexAppServerClient();
+        vi.mocked(appClient.awaitTurnCompleted).mockRestore();
+        const waitingForCompletion = deferred<void>();
+        const awaitTurnCompleted = appClient.awaitTurnCompleted.bind(appClient);
+        vi.spyOn(appClient, "awaitTurnCompleted").mockImplementation((threadId, turnId) => {
+            const completion = awaitTurnCompleted(threadId, turnId);
+            waitingForCompletion.resolve();
+            return completion;
+        });
+        const submitted = deferred<void>();
+        const reviewResponse = deferred<ReviewStartResponse>();
+        vi.spyOn(appClient, "reviewStart").mockImplementation(() => {
+            submitted.resolve();
+            return reviewResponse.promise;
+        });
+        const interruptRequested = deferred<void>();
+        const interruptAck = deferred<void>();
+        const interruptedTurns: Array<{threadId: string, turnId: string}> = [];
+        vi.spyOn(mockFixture.getCodexAcpClient(), "turnInterrupt").mockImplementation(async turn => {
+            interruptedTurns.push(turn);
+            interruptRequested.resolve();
+            await interruptAck.promise;
+        });
+        // @ts-expect-error - Register fixture state for the standard ACP cancel path.
+        mockFixture.getCodexAcpAgent().sessions.set("session-id", sessionState);
         const controller = new AbortController();
-
-        const promptPromise = mockFixture.getCodexAcpAgent().prompt({
-            sessionId: "session-id",
-            prompt: [{ type: "text", text: "/review" }],
-        }, controller.signal);
-
-        await vi.waitFor(() => {
-            expect(reviewStartSpy).toHaveBeenCalled();
+        let settled = false;
+        const prompt = mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id", prompt: [{type: "text", text: "/review"}],
+        }, controller.signal).then(result => { settled = true; return result; });
+        const start = () => mockFixture.sendServerNotification({
+            method: "turn/started",
+            params: {threadId: "session-id", turn: createTurn("native-review-turn-id", "inProgress")},
         });
-
-        controller.abort();
-        await expect(promptPromise).resolves.toMatchObject({stopReason: "cancelled"});
-
-        reviewStart.resolve(createReviewStartResponse("review-thread-id", "review-turn-id"));
-
-        await vi.waitFor(() => {
-            expect(turnInterruptSpy).toHaveBeenCalledWith({
-                threadId: "review-thread-id",
-                turnId: "review-turn-id",
+        const acknowledgeReview = async () => {
+            reviewResponse.resolve(createReviewStartResponse());
+            await waitingForCompletion.promise;
+        };
+        const assertOccupied = async () => {
+            expect(settled).toBe(false);
+            await expect(mockFixture.getCodexAcpAgent().prompt({
+                sessionId: "session-id", prompt: [{type: "text", text: "/status"}],
+            })).rejects.toMatchObject({code: -32600});
+        };
+        await submitted.promise;
+        if (phase === "after-response" || phase === "after-start") await acknowledgeReview();
+        if (phase === "after-start" || phase === "start-before-response") {
+            start();
+            await mockFixture.getCodexAcpClient().waitForSessionNotifications("session-id");
+        }
+        vi.useFakeTimers();
+        try {
+            let cancelRequest: Promise<void> | undefined;
+            if (source === "stop") {
+                cancelRequest = mockFixture.getCodexAcpAgent().cancel({sessionId: "session-id"});
+            } else {
+                controller.abort();
+            }
+            await vi.advanceTimersByTimeAsync(0);
+            await assertOccupied();
+            if (phase === "before-response" || phase === "start-before-response") await acknowledgeReview();
+            if (phase === "before-response" || phase === "after-response") start();
+            await interruptRequested.promise;
+            expect(interruptedTurns.length).toBeGreaterThan(0);
+            expect(interruptedTurns.every(turn =>
+                turn.threadId === "session-id" && turn.turnId === "native-review-turn-id")).toBe(true);
+            interruptAck.resolve();
+            await cancelRequest;
+            await vi.advanceTimersByTimeAsync(0);
+            await assertOccupied();
+            mockFixture.sendServerNotification({
+                method: "turn/completed",
+                params: {threadId: "session-id", turn: createTurn("native-review-turn-id", "interrupted")},
             });
+            await vi.advanceTimersByTimeAsync(0);
+            await assertOccupied();
+            mockFixture.sendServerNotification({method: "turn/completed", params: createReviewCompletedNotification("interrupted")});
+            await expect(prompt).resolves.toMatchObject({stopReason: "cancelled"});
+
+            const recovery = mockFixture.getCodexAcpAgent().prompt({
+                sessionId: "session-id", prompt: [{type: "text", text: "Continue after cancellation"}],
+            });
+            await vi.advanceTimersByTimeAsync(0);
+            mockFixture.sendServerNotification(createTurnCompletedNotification("session-id", "turn-id"));
+            await expect(recovery).resolves.toMatchObject({stopReason: "end_turn"});
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('releases a cancelled review when its start request fails', async () => {
+        const {mockFixture} = setupPromptFixture();
+        const submitted = deferred<void>();
+        let rejectReview: (error: Error) => void = () => {};
+        const reviewResponse = new Promise<ReviewStartResponse>((_resolve, reject) => { rejectReview = reject; });
+        vi.spyOn(mockFixture.getCodexAppServerClient(), "reviewStart").mockImplementation(() => {
+            submitted.resolve();
+            return reviewResponse;
         });
-        expect(awaitTurnCompletedSpy).toHaveBeenCalledWith("review-thread-id", "review-turn-id");
+        const controller = new AbortController();
+        const prompt = mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id", prompt: [{type: "text", text: "/review"}],
+        }, controller.signal);
+        await submitted.promise;
+        controller.abort();
+        rejectReview(new Error("Review submission rejected"));
+        await expect(prompt).resolves.toMatchObject({stopReason: "cancelled"});
+        await expect(mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id", prompt: [{type: "text", text: "Continue after rejected review"}],
+        })).resolves.toMatchObject({stopReason: "end_turn"});
     });
 
     it('returns cancelled when review slash command is interrupted', async () => {
