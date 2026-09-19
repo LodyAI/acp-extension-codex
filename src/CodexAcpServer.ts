@@ -264,7 +264,7 @@ interface ActivePrompt {
     signal: AbortSignal;
     currentTurn: { threadId: string, turnId: string } | null;
     hasCompletedTurn: boolean;
-    compactionInFlight: boolean;
+    nativeCommandInFlight: boolean;
     requestCancel: () => void;
     requestClose: () => void;
     complete: () => void;
@@ -2830,7 +2830,7 @@ export class CodexAcpServer {
             signal: abortController.signal,
             currentTurn: null,
             hasCompletedTurn: false,
-            compactionInFlight: false,
+            nativeCommandInFlight: false,
             requestCancel: () => {
                 if (abortController.signal.aborted) {
                     return;
@@ -2912,7 +2912,7 @@ export class CodexAcpServer {
 
     private cancelBeforeTurnStarted(activePrompt: ActivePrompt): Promise<null> {
         return activePrompt.cancelSignal.then(() => {
-            if (activePrompt.currentTurn === null && !activePrompt.compactionInFlight) {
+            if (activePrompt.currentTurn === null && !activePrompt.nativeCommandInFlight) {
                 return null;
             }
             return new Promise<null>(() => {});
@@ -2995,9 +2995,9 @@ export class CodexAcpServer {
     }
 
     private interruptLateStartedTurn(turn: { threadId: string, turnId: string }, activePrompt: ActivePrompt): void {
-        if (activePrompt.compactionInFlight) {
+        if (activePrompt.nativeCommandInFlight) {
             this.codexAcpClient.markTurnStale(turn);
-            // Interrupt acknowledgement cannot settle a submitted compaction.
+            // Interrupt acknowledgement cannot settle a submitted native command.
             void this.requestTurnInterrupt(turn, "Cancel");
             return;
         }
@@ -3239,11 +3239,11 @@ export class CodexAcpServer {
                     pendingTurnStart?.resolve(turnId);
                     onTurnStarted?.();
                 },
-                onCompactionStarted: () => {
-                    activePrompt.compactionInFlight = true;
+                onNativeCommandStarted: () => {
+                    activePrompt.nativeCommandInFlight = true;
                 },
-                onCompactionFinished: () => {
-                    activePrompt.compactionInFlight = false;
+                onNativeCommandFinished: () => {
+                    activePrompt.nativeCommandInFlight = false;
                 },
                 setConfigOption: async (configId, value) => {
                     await this.applySessionConfigOption(sessionState, {
@@ -3776,9 +3776,9 @@ export class CodexAcpServer {
         }
 
         const activePrompt = this.activePrompts.get(params.sessionId);
-        if (activePrompt?.compactionInFlight) {
+        if (activePrompt?.nativeCommandInFlight) {
             activePrompt.requestCancel();
-            // A submitted compact owns the prompt before its native turn arrives.
+            // A submitted native command owns the prompt before its turn id arrives.
             // The turn-start callback interrupts it when the id becomes available.
             if (activePrompt.currentTurn === null) return;
         }

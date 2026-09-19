@@ -47,6 +47,10 @@
   the turn id and interrupts it on arrival. Never release the prompt on the compact
   start/interrupt ACK, local synthetic completion, `item/completed`, or
   `thread/compacted` alone.
+- Review owns the prompt from submission, including the interval before its native
+  turn id arrives. Stop and request abort latch cancellation, interrupt the observed
+  native turn, and await the `review/start` response turn's terminal notification
+  or connection closure. The control and completion ids are not aliases.
 - ACP v1 prompt completion follows native Goal continuations across turn boundaries. Keep
   the prompt and interaction handlers open until the goal stops and its last native turn
   drains, or the turn fails/is cancelled. Never issue another `turn/start` after a routed

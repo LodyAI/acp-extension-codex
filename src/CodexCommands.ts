@@ -58,8 +58,8 @@ export function resolveGoalCommandHandleResult(
 export type CommandHandleOptions = {
     onTurnStartPending?: () => void;
     onTurnStarted?: (turnId: string, threadId: string) => void;
-    onCompactionStarted?: () => void;
-    onCompactionFinished?: () => void;
+    onNativeCommandStarted?: () => void;
+    onNativeCommandFinished?: () => void;
     setConfigOption?: (configId: string, value: string | boolean) => Promise<void>;
 };
 
@@ -269,7 +269,7 @@ export class CodexCommands {
             }
             case "compact": {
                 options.onTurnStartPending?.();
-                options.onCompactionStarted?.();
+                options.onNativeCommandStarted?.();
                 try {
                     const turnCompleted = await this.runWithProcessCheck(() =>
                         this.codexAcpClient.runCompact(sessionId, (turnId) => {
@@ -278,7 +278,7 @@ export class CodexCommands {
                     );
                     return { handled: true, turnCompleted };
                 } finally {
-                    options.onCompactionFinished?.();
+                    options.onNativeCommandFinished?.();
                 }
             }
             case "goal": {
@@ -374,13 +374,18 @@ export class CodexCommands {
         options: CommandHandleOptions,
     ): Promise<TurnCompletedNotification> {
         options.onTurnStartPending?.();
-        return await this.runWithProcessCheck(() => this.codexAcpClient.runReview(
-            sessionState.sessionId,
-            target,
-            (turnId, threadId) => {
-                this.handleCommandTurnStarted(sessionState, options, turnId, threadId);
-            },
-        ));
+        options.onNativeCommandStarted?.();
+        try {
+            return await this.runWithProcessCheck(() => this.codexAcpClient.runReview(
+                sessionState.sessionId,
+                target,
+                (turnId, threadId) => {
+                    this.handleCommandTurnStarted(sessionState, options, turnId, threadId);
+                },
+            ));
+        } finally {
+            options.onNativeCommandFinished?.();
+        }
     }
 
     private async runGoalCommand(

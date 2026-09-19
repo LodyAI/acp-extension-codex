@@ -152,9 +152,11 @@ describe("CodexAppServerClient turn lifecycle", () => {
         } as unknown as MessageConnection;
         const client = new CodexAppServerClient(connection);
         const started: Array<string> = [];
+        let observeStart: () => void = () => {};
+        const nativeStarted = new Promise<void>(resolve => { observeStart = resolve; });
         const review = client.runReview(
             {threadId: "thread-1", target: {type: "uncommittedChanges"}, delivery: "inline"} as ReviewStartParams,
-            (turnId) => started.push(turnId),
+            (turnId) => { started.push(turnId); observeStart(); },
         );
 
         notify({method: "turn/started", params: {threadId: "thread-1", turn: turn("native-turn", "inProgress")} });
@@ -164,7 +166,8 @@ describe("CodexAppServerClient turn lifecycle", () => {
             turn: turn("response-turn", "inProgress"),
         });
 
-        await vi.waitFor(() => expect(started).toEqual(["native-turn"]));
+        await nativeStarted;
+        expect(started).toEqual(["native-turn"]);
         notify({method: "turn/completed", params: {threadId: "thread-1", turn: turn("response-turn", "interrupted")} });
 
         await expect(review).resolves.toMatchObject({
@@ -200,5 +203,27 @@ describe("CodexAppServerClient turn lifecycle", () => {
         expect(settled).toBe(false);
         notify({method: "turn/completed", params: {threadId: "thread-1", turn: turn("response-turn", "interrupted")} });
         await expect(review).resolves.toMatchObject({turn: {id: "response-turn", status: "interrupted"}});
+    });
+
+    it.each([false, true])("rejects review on connection closure (native start: %s)", async (started) => {
+        const h = compactHarness(async () => ({
+            reviewThreadId: "thread-1", turn: {id: "review-turn", status: "inProgress"},
+        }));
+        let registered: () => void = () => {};
+        const completionRegistered = new Promise<void>(resolve => { registered = resolve; });
+        const awaitTurnCompleted = h.client.awaitTurnCompleted.bind(h.client);
+        vi.spyOn(h.client, "awaitTurnCompleted").mockImplementation((threadId, turnId) => {
+            const result = awaitTurnCompleted(threadId, turnId);
+            registered();
+            return result;
+        });
+        const review = h.client.runReview({
+            threadId: "thread-1", target: {type: "uncommittedChanges"}, delivery: "inline",
+        });
+        const rejected = expect(review).rejects.toThrow("Codex process exited before completing the turn");
+        await completionRegistered;
+        if (started) h.start("thread-1", "native-review-turn");
+        h.close();
+        await rejected;
     });
 });
