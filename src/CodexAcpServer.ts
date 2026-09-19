@@ -50,11 +50,13 @@ import {
     createModelConfigOption,
     createReasoningEffortConfigOption,
     findSupportedEffort,
+    formatModelDisplayName,
     MODEL_CONFIG_ID,
     REASONING_EFFORT_CONFIG_ID,
 } from "./ModelConfigOption";
 import type {TokenCount} from "./TokenCount";
 import {toPromptUsage} from "./TokenCount";
+import {CodexTurnUsage} from "./CodexUsage";
 import {CodexCommands, GOAL_CONTINUATION_PROMPT, type CommandHandleOptions} from "./CodexCommands";
 import {GoalPromptLifecycle} from "./GoalPromptLifecycle";
 import {SteeringQueue} from "./SteeringQueue";
@@ -140,6 +142,7 @@ import {
     AIR_AGENT_FILE_CHANGE_REPORT_KEY,
     AIR_ASYNC_TASKS_KEY,
     AIR_NATIVE_SUBAGENT_SESSIONS_KEY,
+    AIR_RECOMMENDED_CONFIG_VALUE_KEY,
     AIR_EXTENSION_CAPABILITIES_KEY,
     AIR_EXTENSION_VERSION,
     AIR_EXTENSION_VERSION_KEY,
@@ -154,12 +157,17 @@ import {
     type AgentFileChangeReport,
     type AgentFileChangeReportRequest,
     type AgentFileChangeReportUnavailableReason,
+    type AgentFileChangeWorkspace,
+    AgentFileChangeReportError,
+    captureAgentFileChangeWorkspace,
+    createReportedAgentFileChangeReport,
     createUnavailableAgentFileChangeReport,
     parseAgentFileChangeReportRequest,
 } from "./AgentFileChangeReport";
 
 
 export interface SessionState {
+    turnUsage?: import("./CodexUsage").CodexTurnUsage;
     sessionId: string,
     currentModelId: string,
     availableModels: Array<Model>,
@@ -262,7 +270,7 @@ interface ActivePrompt {
     signal: AbortSignal;
     currentTurn: { threadId: string, turnId: string } | null;
     hasCompletedTurn: boolean;
-    compactionInFlight: boolean;
+    nativeCommandInFlight: boolean;
     requestCancel: () => void;
     requestClose: () => void;
     complete: () => void;
@@ -270,7 +278,12 @@ interface ActivePrompt {
 
 interface PendingSteer {
     activePrompt: ActivePrompt;
+    threadId: string;
     turnId: string;
+    requestPending: boolean;
+    acknowledgement: Promise<void> | null;
+    applied: Promise<void>;
+    resolveApplied: () => void;
 }
 
 export interface CodexProcessState {
@@ -283,12 +296,6 @@ export interface CodexProcessState {
 }
 
 export class CodexAcpServer {
-    private static readonly MODEL_NAME_TOKEN_OVERRIDES: Record<string, string> = {
-        gpt: "GPT",
-        mini: "Mini",
-        codex: "Codex",
-    };
-
     private codexAcpClient: CodexAcpClient;
     private readonly connection: AcpClientConnection;
     private readonly defaultAuthRequest: CodexAuthRequest | null;
@@ -424,6 +431,7 @@ export class CodexAcpServer {
                             AIR_AGENT_FILE_CHANGE_REPORT_KEY,
                             AIR_NATIVE_SUBAGENT_SESSIONS_KEY,
                             AIR_ASYNC_TASKS_KEY,
+                            AIR_RECOMMENDED_CONFIG_VALUE_KEY,
                         ],
                     },
                 },
@@ -784,6 +792,7 @@ export class CodexAcpServer {
             sessionState.cwd,
             () => sessionState.sessionTitleSource,
         );
+        if (operation.kind === "new") sessionState.turnUsage = new CodexTurnUsage(true);
         this.installSessionState(sessionState);
         this.publishRateLimitsAsync(sessionState);
         subscribed = false;
@@ -1653,7 +1662,11 @@ export class CodexAcpServer {
                 throw error;
             }
             logger.error(`Steering request for session ${params.sessionId} failed`, error);
-            return {outcome: "failed"};
+            // Only an explicit refusal authorizes ordinary-prompt replay.
+            // An unexpected adapter failure cannot prove
+            // whether app-server accepted the steer, so preserve that
+            // ambiguity by rejecting the request instead.
+            throw error;
         } finally {
             if (queue.isIdle && this.steeringQueues.get(params.sessionId) === queue) {
                 this.steeringQueues.delete(params.sessionId);
@@ -1716,11 +1729,8 @@ export class CodexAcpServer {
     /**
      * Attempts to inject the prompt into the given running turn.
      *
-     * Only an explicit native refusal proves non-delivery. A turn ending while
-     * an RPC fails does not: Codex may have consumed the input before the error.
-     *
-     * @returns true when the prompt was injected; false when the target turn
-     *     already ended.
+     * After submission, only an explicit refusal proves non-delivery. A turn
+     * ending (including Stop) does not prove whether it consumed the input.
      */
     private async injectSteerIntoActiveTurn(
         params: SessionSteerRequest,
@@ -1745,9 +1755,16 @@ export class CodexAcpServer {
         if (pending.has(params.steerId)) {
             throw RequestError.invalidRequest(`Duplicate Codex steer id: ${params.steerId}`);
         }
-        pending.set(params.steerId, {activePrompt, turnId});
+        let resolveApplied: () => void = () => {};
+        const applied = new Promise<void>(resolve => { resolveApplied = resolve; });
+        const steer: PendingSteer = {
+            activePrompt, threadId: activeTurn.threadId, turnId,
+            requestPending: true, acknowledgement: null, applied, resolveApplied,
+        };
+        pending.set(params.steerId, steer);
         this.pendingSteers.set(params.sessionId, pending);
 
+        let requestAccepted = false;
         try {
             const response = await this.runWithProcessCheck(() => this.codexAcpClient.steerTurn({
                 threadId: activeTurn.threadId,
@@ -1761,17 +1778,59 @@ export class CodexAcpServer {
                     `Codex steered unexpected turn ${response.turnId}; expected ${turnId}`,
                 );
             }
+            requestAccepted = true;
             return true;
         } catch (err) {
-            if (pending.get(params.steerId)?.activePrompt === activePrompt) {
-                pending.delete(params.steerId);
-                if (pending.size === 0) this.pendingSteers.delete(params.sessionId);
+            const refused = this.isNoActiveTurnToSteerError(err);
+            if (await this.reconcileSteer(params, steer, !refused)) {
+                await this.acknowledgeSteer(params.sessionId, params.steerId, steer);
+                return true;
             }
-            await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
-            if (!this.isNoActiveTurnToSteerError(err)) {
-                throw err;
+            if (refused) return false;
+            throw err;
+        } finally {
+            steer.requestPending = false;
+            if (!requestAccepted || this.activePrompts.get(params.sessionId) !== activePrompt) {
+                this.removePendingSteer(params.sessionId, params.steerId, steer);
             }
-            return false;
+        }
+    }
+
+    private async reconcileSteer(
+        params: SessionSteerRequest,
+        steer: PendingSteer,
+        readHistory: boolean,
+    ): Promise<boolean> {
+        let finished = false;
+        let timeout: ReturnType<typeof setTimeout> | undefined;
+        try {
+            // This drains received notifications, not the transport or rollout
+            // store. Missing history therefore cannot establish non-delivery.
+            const historyApplied = (async () => {
+                await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
+                if (steer.acknowledgement !== null) return true;
+                if (finished || !readHistory) return false;
+                const thread = await this.codexAcpClient.readSessionHistory(steer.threadId);
+                return thread.id === steer.threadId && thread.turns.some(turn =>
+                    turn.id === steer.turnId && turn.items.some(item =>
+                        item.type === "userMessage" && item.clientId === params.steerId));
+            })().catch(error => {
+                logger.error("Could not reconcile Codex steer history", error);
+                return false;
+            });
+            return await Promise.race([
+                historyApplied,
+                steer.applied.then(() => true),
+                new Promise<false>(resolve => {
+                    timeout = setTimeout(() => resolve(false), 5_000);
+                    timeout.unref?.();
+                }),
+            ]) || steer.acknowledgement !== null;
+        } finally {
+            // Late read results are read-only: never acknowledge after the host
+            // has already received an unknown-delivery error.
+            finished = true;
+            clearTimeout(timeout);
         }
     }
 
@@ -1906,14 +1965,26 @@ export class CodexAcpServer {
 
     private createSessionConfigOptions(sessionState: SessionState): Array<acp.SessionConfigOption> {
         const currentModelId = ModelId.fromString(sessionState.currentModelId);
+        const useRecommendedValue = clientSupportsAirCapability(
+            this.clientCapabilities,
+            AIR_RECOMMENDED_CONFIG_VALUE_KEY,
+        );
+        const currentModel = this.findCurrentModel(sessionState.availableModels, sessionState.currentModelId);
+        const recommendedModelId = useRecommendedValue
+            ? sessionState.availableModels.find(model => model.isDefault)?.id
+            : undefined;
         const configOptions = [
             sessionState.agentMode.toConfigOption(),
             createCollaborationModeConfigOption(sessionState.collaborationMode),
-            createModelConfigOption(sessionState.availableModels, currentModelId.model),
+            createModelConfigOption(sessionState.availableModels, currentModelId.model, recommendedModelId),
         ];
         if (sessionState.supportedReasoningEfforts.length > 0) {
             configOptions.push(
-                createReasoningEffortConfigOption(sessionState.supportedReasoningEfforts, currentModelId.effort),
+                createReasoningEffortConfigOption(
+                    sessionState.supportedReasoningEfforts,
+                    currentModelId.effort,
+                    useRecommendedValue ? currentModel?.defaultReasoningEffort : undefined,
+                ),
             );
         }
         if (sessionState.currentModelSupportsFast) {
@@ -2054,19 +2125,12 @@ export class CodexAcpServer {
         return models.find(m => m.id === modelId.model);
     }
 
-    private normalizeModelDisplayName(displayName: string): string {
-        return displayName
-            .split("-")
-            .map((token) => CodexAcpServer.MODEL_NAME_TOKEN_OVERRIDES[token.toLowerCase()] ?? token)
-            .join("-");
-    }
-
     private createModelState(availableModels: Model[], selectedModelId: string): LegacySessionModelState {
         const allowedModels = availableModels
             .flatMap((model) =>
                 model.supportedReasoningEfforts.map((effort) => ({
                     modelId: ModelId.fromComponents(model, effort.reasoningEffort).toString(),
-                    name: `${this.normalizeModelDisplayName(model.displayName)} (${effort.reasoningEffort})`,
+                    name: `${formatModelDisplayName(model.displayName)} (${effort.reasoningEffort})`,
                     description: `${model.description} ${effort.description}`,
                 }))
             );
@@ -2402,27 +2466,25 @@ export class CodexAcpServer {
         turnId: string | null,
         request: AgentFileChangeReportRequest,
         unavailableReason: AgentFileChangeReportUnavailableReason,
-        signal: AbortSignal,
+        turnDiff: string,
+        workspace: AgentFileChangeWorkspace,
     ): Promise<void> {
         let report: AgentFileChangeReport;
         try {
             report = turnId === null
                 ? createUnavailableAgentFileChangeReport(request.requestId, unavailableReason)
-                : await this.codexAcpClient.runAgentFileChangeReport({
-                    sessionId: sessionState.sessionId,
-                    turnId,
-                    // The client owns request-id correlation and duplicate suppression. The wrapper
-                    // stays stateless so a retried ACP prompt still receives a terminal report.
-                    requestId: request.requestId,
-                    workspace: {
-                        cwd: sessionState.cwd,
-                        additionalDirectories: sessionState.additionalDirectories,
-                    },
-                    signal,
-                });
+                : createReportedAgentFileChangeReport(request.requestId, turnDiff, workspace);
         } catch (error) {
-            logger.error("Agent file-change report failed unexpectedly", error);
-            report = createUnavailableAgentFileChangeReport(request.requestId, "providerError");
+            logger.error(
+                error instanceof AgentFileChangeReportError
+                    ? "Agent file-change report unavailable"
+                    : "Agent file-change report failed unexpectedly",
+                error,
+            );
+            report = createUnavailableAgentFileChangeReport(
+                request.requestId,
+                error instanceof AgentFileChangeReportError ? error.reason : "providerError",
+            );
         }
         try {
             const session = new ACPSessionConnection(this.connection, sessionState.sessionId);
@@ -2772,7 +2834,7 @@ export class CodexAcpServer {
             signal: abortController.signal,
             currentTurn: null,
             hasCompletedTurn: false,
-            compactionInFlight: false,
+            nativeCommandInFlight: false,
             requestCancel: () => {
                 if (abortController.signal.aborted) {
                     return;
@@ -2805,11 +2867,16 @@ export class CodexAcpServer {
         return activePrompt;
     }
 
+    private setActivePromptTurn(activePrompt: ActivePrompt, turn: { threadId: string, turnId: string }): void {
+        activePrompt.hasCompletedTurn = false;
+        activePrompt.currentTurn = turn;
+    }
+
     private clearPendingSteers(sessionId: string, activePrompt: ActivePrompt): void {
         const pending = this.pendingSteers.get(sessionId);
         if (!pending) return;
         for (const [steerId, steer] of pending) {
-            if (steer.activePrompt === activePrompt) pending.delete(steerId);
+            if (steer.activePrompt === activePrompt && !steer.requestPending) pending.delete(steerId);
         }
         if (pending.size === 0) this.pendingSteers.delete(sessionId);
     }
@@ -2825,15 +2892,31 @@ export class CodexAcpServer {
         const pending = this.pendingSteers.get(sessionId);
         if (!pending) return;
         const steer = pending.get(steerId);
-        if (!steer || steer.activePrompt !== activePrompt || steer.turnId !== event.params.turnId) return;
+        if (!steer || steer.activePrompt !== activePrompt
+            || steer.threadId !== event.params.threadId || steer.turnId !== event.params.turnId) return;
+        await this.acknowledgeSteer(sessionId, steerId, steer);
+    }
+
+    private removePendingSteer(sessionId: string, steerId: string, steer: PendingSteer): void {
+        const pending = this.pendingSteers.get(sessionId);
+        if (pending?.get(steerId) !== steer) return;
         pending.delete(steerId);
         if (pending.size === 0) this.pendingSteers.delete(sessionId);
-        await this.connection.notify(CODEX_STEER_APPLIED_METHOD, {sessionId, steerId});
+    }
+
+    private async acknowledgeSteer(sessionId: string, steerId: string, steer: PendingSteer): Promise<void> {
+        if (steer.acknowledgement === null) {
+            steer.acknowledgement = Promise.resolve().then(() =>
+                this.connection.notify(CODEX_STEER_APPLIED_METHOD, {sessionId, steerId}));
+            this.removePendingSteer(sessionId, steerId, steer);
+            steer.resolveApplied();
+        }
+        await steer.acknowledgement;
     }
 
     private cancelBeforeTurnStarted(activePrompt: ActivePrompt): Promise<null> {
         return activePrompt.cancelSignal.then(() => {
-            if (activePrompt.currentTurn === null && !activePrompt.compactionInFlight) {
+            if (activePrompt.currentTurn === null && !activePrompt.nativeCommandInFlight) {
                 return null;
             }
             return new Promise<null>(() => {});
@@ -2916,9 +2999,9 @@ export class CodexAcpServer {
     }
 
     private interruptLateStartedTurn(turn: { threadId: string, turnId: string }, activePrompt: ActivePrompt): void {
-        if (activePrompt.compactionInFlight) {
+        if (activePrompt.nativeCommandInFlight) {
             this.codexAcpClient.markTurnStale(turn);
-            // Interrupt acknowledgement cannot settle a submitted compaction.
+            // Interrupt acknowledgement cannot settle a submitted native command.
             void this.requestTurnInterrupt(turn, "Cancel");
             return;
         }
@@ -3023,6 +3106,9 @@ export class CodexAcpServer {
             ? parseAgentFileChangeReportRequest(params._meta)
             : null;
         const goalPromptControl = parseGoalPromptControl(params._meta);
+        const agentFileChangeWorkspace = agentFileChangeReportRequest === null
+            ? null
+            : captureAgentFileChangeWorkspace(sessionState.cwd, sessionState.additionalDirectories);
         let agentFileChangeReportTurnId: string | null = null;
         let agentFileChangeReportUnavailableReason: AgentFileChangeReportUnavailableReason = "providerError";
         let promptWasCancelled = false;
@@ -3064,6 +3150,9 @@ export class CodexAcpServer {
         };
 
         try {
+            sessionState.turnUsage ??= new CodexTurnUsage(false,
+                this.codexAcpClient.appServerClient.getThreadTokenUsage(params.sessionId)?.tokenUsage.total);
+            sessionState.turnUsage.prepare(ModelId.fromString(sessionState.currentModelId).model);
             const promptEventHandler = new CodexEventHandler(
                 this.connection,
                 sessionState,
@@ -3072,6 +3161,7 @@ export class CodexAcpServer {
                 this.sessionFailureEpoch,
                 sessionState.subagents,
                 (accountUpdated) => this.handleAccountUpdated(accountUpdated),
+                agentFileChangeReportRequest !== null,
             );
             eventHandler = promptEventHandler;
             const permissionLifecycle = this.permissionLifecycleContext(sessionState);
@@ -3097,7 +3187,7 @@ export class CodexAcpServer {
                         goalLifecycle.observe(event);
                         if (event.method === "turn/started" && event.params.threadId === params.sessionId) {
                             const turn = {threadId: params.sessionId, turnId: event.params.turn.id};
-                            activePrompt.currentTurn = turn;
+                            this.setActivePromptTurn(activePrompt, turn);
                             if (this.promptShouldStop(params.sessionId, activePrompt)) {
                                 this.interruptLateStartedTurn(turn, activePrompt);
                                 return;
@@ -3107,7 +3197,8 @@ export class CodexAcpServer {
                         }
                         if (event.method === "turn/completed" &&
                             event.params.threadId === params.sessionId &&
-                            activePrompt.currentTurn?.turnId === event.params.turn.id) {
+                            activePrompt.currentTurn?.threadId === event.params.threadId &&
+                            activePrompt.currentTurn.turnId === event.params.turn.id) {
                             activePrompt.currentTurn = null;
                             activePrompt.hasCompletedTurn = true;
                         }
@@ -3120,7 +3211,8 @@ export class CodexAcpServer {
                     }
                     const completesActiveTurn = event.method === "turn/completed"
                         && event.params.threadId === sessionState.sessionId
-                        && event.params.turn.id === sessionState.currentTurnId;
+                        && activePrompt.currentTurn?.threadId === event.params.threadId
+                        && activePrompt.currentTurn.turnId === event.params.turn.id;
                     await promptEventHandler.handleNotification(event);
                     if (completesActiveTurn) {
                         // The prompt may remain open for plan approval after its turn has ended. Switch at
@@ -3146,7 +3238,7 @@ export class CodexAcpServer {
                 onTurnStarted: (turnId, threadId) => {
                     const turn = {threadId, turnId};
                     if (threadId === params.sessionId) goalLifecycle.startTurn(turnId);
-                    activePrompt.currentTurn = turn;
+                    this.setActivePromptTurn(activePrompt, turn);
                     if (this.promptShouldStop(params.sessionId, activePrompt)) {
                         this.interruptLateStartedTurn(turn, activePrompt);
                         return;
@@ -3155,11 +3247,11 @@ export class CodexAcpServer {
                     pendingTurnStart?.resolve(turnId);
                     onTurnStarted?.();
                 },
-                onCompactionStarted: () => {
-                    activePrompt.compactionInFlight = true;
+                onNativeCommandStarted: () => {
+                    activePrompt.nativeCommandInFlight = true;
                 },
-                onCompactionFinished: () => {
-                    activePrompt.compactionInFlight = false;
+                onNativeCommandFinished: () => {
+                    activePrompt.nativeCommandInFlight = false;
                 },
                 setConfigOption: async (configId, value) => {
                     await this.applySessionConfigOption(sessionState, {
@@ -3193,7 +3285,7 @@ export class CodexAcpServer {
                 return cancelledPromptResponse();
             }
             if (commandResult.handled) {
-                if (commandResult.turnCompleted) {
+                if (commandResult.turnCompleted && commandResult.waitForGoalContinuation !== false) {
                     await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
                     const firstCommandTurn = commandResult.turnCompleted;
                     const completed = await this.runWithProcessCheck(() => Promise.race([
@@ -3270,6 +3362,7 @@ export class CodexAcpServer {
             sessionState.lastTokenUsage = null;
             ensurePendingTurnStart();
             goalLifecycle.prepareTurn();
+            sessionState.turnUsage.prepare(modelId.model);
             const sendPromptPromise = this.runWithProcessCheck(
                 () => this.codexAcpClient.sendPrompt(
                     effectiveParams,
@@ -3286,7 +3379,7 @@ export class CodexAcpServer {
                             onTurnStarted?.();
                             return;
                         }
-                        activePrompt.currentTurn = turn;
+                        this.setActivePromptTurn(activePrompt, turn);
                         if (this.promptShouldStop(params.sessionId, activePrompt)) {
                             this.interruptLateStartedTurn(turn, activePrompt);
                             return;
@@ -3382,6 +3475,7 @@ export class CodexAcpServer {
                     activePrompt.currentTurn = null;
                     sessionState.currentTurnId = null;
                     goalLifecycle.prepareTurn();
+                    sessionState.turnUsage.prepare(modelId.model);
                     const implementationPromise = this.runWithProcessCheck(
                         () => this.codexAcpClient.sendPrompt(
                             implementationRequest,
@@ -3394,7 +3488,7 @@ export class CodexAcpServer {
                             (turnId) => {
                                 const turn = {threadId: params.sessionId, turnId};
                                 if (!goalLifecycle.startSubmittedTurn(turnId)) return;
-                                activePrompt.currentTurn = turn;
+                                this.setActivePromptTurn(activePrompt, turn);
                                 if (this.promptShouldStop(params.sessionId, activePrompt)) {
                                     this.interruptLateStartedTurn(turn, activePrompt);
                                     return;
@@ -3543,13 +3637,24 @@ export class CodexAcpServer {
             } catch (error) {
                 logger.error("Failed to publish terminal subagent state during prompt cleanup", error);
             }
-            if (agentFileChangeReportRequest !== null) {
+            if (agentFileChangeReportRequest !== null && agentFileChangeWorkspace !== null) {
+                if (promptWasCancelled || activePrompt.signal.aborted || this.sessionIsClosing(params.sessionId)) {
+                    agentFileChangeReportTurnId = null;
+                    agentFileChangeReportUnavailableReason = "cancelled";
+                } else if (agentFileChangeReportTurnId !== null
+                    && eventHandler?.isTurnDiffOversized(agentFileChangeReportTurnId)) {
+                    agentFileChangeReportTurnId = null;
+                    agentFileChangeReportUnavailableReason = "invalidOutput";
+                }
                 await this.publishAgentFileChangeReport(
                     sessionState,
                     agentFileChangeReportTurnId,
                     agentFileChangeReportRequest,
                     agentFileChangeReportUnavailableReason,
-                    activePrompt.signal,
+                    agentFileChangeReportTurnId === null || eventHandler === null
+                        ? ""
+                        : eventHandler.getTurnDiff(agentFileChangeReportTurnId),
+                    agentFileChangeWorkspace,
                 );
             }
             logger.log("Prompt completed", {sessionId: params.sessionId});
@@ -3690,9 +3795,9 @@ export class CodexAcpServer {
         }
 
         const activePrompt = this.activePrompts.get(params.sessionId);
-        if (activePrompt?.compactionInFlight) {
+        if (activePrompt?.nativeCommandInFlight) {
             activePrompt.requestCancel();
-            // A submitted compact owns the prompt before its native turn arrives.
+            // A submitted native command owns the prompt before its turn id arrives.
             // The turn-start callback interrupts it when the id becomes available.
             if (activePrompt.currentTurn === null) return;
         }

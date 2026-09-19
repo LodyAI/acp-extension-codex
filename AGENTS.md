@@ -33,11 +33,24 @@
 
 ## Docs
 
+- Usage reports assign native root-thread counter increments to the model frozen
+  from the submitted turn parameters, not the UI model at notification time.
+  Each native turn is a separate accounting lifetime: notification-local
+  `_meta.codex.usageTurnId` lets Lody persist cumulative turn snapshots under
+  a stable turn key. Never sum repeated snapshots or include restored history.
+  Keep only the native snapshot and current turn in memory; no sidecar, session
+  metadata baseline, historical model ledger, raw-response accounting or child totals.
+  If a resume snapshot is missing, anchor the first notification without billing it.
+
 - Manual `/compact` owns the native turn reported by `turn/started` until matching
   `turn/completed`. Cancel sends `turn/interrupt`; a pre-start cancellation waits for
   the turn id and interrupts it on arrival. Never release the prompt on the compact
   start/interrupt ACK, local synthetic completion, `item/completed`, or
   `thread/compacted` alone.
+- Review owns the prompt from submission, including the interval before its native
+  turn id arrives. Stop and request abort latch cancellation, interrupt the observed
+  native turn, and await the `review/start` response turn's terminal notification
+  or connection closure. The control and completion ids are not aliases.
 - ACP v1 prompt completion follows native Goal continuations across turn boundaries. Keep
   the prompt and interaction handlers open until the goal stops and its last native turn
   drains, or the turn fails/is cancelled. Never issue another `turn/start` after a routed
@@ -46,11 +59,17 @@
   remains a separate Core snapshot; do not add a private execution lifecycle protocol.
 - Codex app-server usage: see https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md when touching protocol/transport details, adding or consuming JSON-RPC methods, handling approvals/turn events, or updating generated schema/clients.
 - App-server events: prefer `thread/*`, `turn/*`, and `item/*` event surfaces; avoid the deprecated `codex/event/*` API (planned removal). Keep implementations aligned with generated types in `src/app-server` (including `v2` exports).
-- Steer uses app-server `turn/steer` on the tracked active turn. Correlate `clientUserMessageId` and acknowledge only the matching `item/completed(userMessage)`; never emulate steer with a second `turn/start`.
-- Acknowledged steer is inject-or-refuse: JSON-RPC `invalid request` (`-32600`)
-  proves non-delivery and lets Lody requeue the same message as a normal prompt.
-  No active turn is a refusal; a transport/internal failure is not, even when the
-  target turn ended meanwhile. Never authorize automatic retry from that race.
+- Steer uses app-server `turn/steer` on the tracked active turn. Acknowledge only a
+  matching `item/completed(userMessage)` or persisted user item with the original
+  thread id, turn id, and `clientId = clientUserMessageId`. Retain in-flight identity
+  through prompt completion and bounded error reconciliation; live/history evidence
+  emits one acknowledgement. Never emulate steer with a second `turn/start`.
+- Acknowledged steer is inject-or-refuse: use JSON-RPC `invalid request` (`-32600`)
+  for proven non-delivery so Lody can requeue the same message as a normal prompt.
+  Preserve unexpected or transport-ambiguous errors; they never authorize replay.
+- Turn completion, cancellation, missing history, and history-read failures are not
+  proof of steer non-delivery. Reconciliation reads history once without resuming or
+  resending; it does not provide cross-restart recovery or idempotency.
 - Session fork uses app-server `thread/fork` and installs the returned child as an independent ACP
   session. Agent message updates expose their Codex turn id as `_meta.lody.turnId`;
   `_meta.lody.forkAtTurn.turnId` is passed directly to `thread/fork.lastTurnId`. Do not maintain

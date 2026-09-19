@@ -39,6 +39,7 @@ export function mergeRateLimitSnapshot(
     return {
         ...update,
         limitId: update.limitId ?? "codex",
+        normalModelSlug: update.normalModelSlug ?? previous.normalModelSlug,
         credits: update.credits ?? previous.credits,
         individualLimit: update.individualLimit ?? previous.individualLimit,
         spendControlReached: update.spendControlReached ?? previous.spendControlReached,

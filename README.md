@@ -10,6 +10,7 @@ Use [OpenAI Codex](https://github.com/openai/codex) from [Agent Client Protocol]
 
 - ChatGPT, API key, and client-provided custom gateway authentication.
 - Model, reasoning effort, fast mode, approval, and sandbox mode configuration.
+- Concrete recommended model and reasoning-effort values through the opt-in [AIR recommended config values](docs/recommended-config-values-extension.md) capability.
 - Text prompts, embedded context, images, resource links, and additional workspace directories.
 - Shell command, file change, [permission request](docs/permission-extension.md), MCP tool call, terminal output, reasoning, plan, web search, image generation, image view, token usage, and review events.
 - [Native ACP subagent sessions](docs/subagent-sessions.md) (after capability negotiation) with separate child histories and root-routed permissions; a legacy tool-call fallback otherwise.
@@ -60,6 +61,23 @@ rate-limit query, acknowledged steering, goals, subagent/background-task lifecyc
 compaction lifecycle, and history reads. ACP-standard plans, elicitation, session
 forking, and context-window usage stay on their standard protocol paths.
 
+Usage reporting assigns differences between native root-thread token snapshots
+to the model selected for the submitted turn. Cache/input/output/reasoning buckets
+remain disjoint. Each native turn reports its own cumulative totals, tagged with
+notification-local `_meta.codex.usageTurnId`; Lody's matching CLI uses a stable
+per-turn persistence identity so repeated delivery cannot count a turn twice.
+
+Only the preceding native snapshot and current turn are held in memory. There is
+no sidecar, historical model ledger or session metadata baseline. Native resume
+snapshots are comparison points, not new usage; when unavailable, the first
+notification is conservatively skipped. Subagents are not summed into the root,
+and native resets, reroutes and crash recovery are best effort rather than exact
+billing. A mid-turn UI selection change applies to the next submitted turn.
+
+The adapter and Lody CLI must be deployed together for turn-scoped usage.
+Unmarked older adapters keep their existing accounting scope. Old development
+sidecars and persisted history are neither read nor automatically migrated.
+
 Codex steering uses `_lody/session/steer` and confirms application with
 `_lody/session/steer_applied`. It keeps the active turn's model, mode, and
 configuration; slash commands cannot be steered.
@@ -68,10 +86,15 @@ Acknowledged steering is inject-or-refuse. When no turn can accept input, the
 adapter rejects with JSON-RPC `invalid request` (`-32600`), proving that the
 message was not delivered. Lody requeues that same message as an ordinary
 `session/prompt` after the current prompt finishes; the adapter never starts a
-detached replacement turn. Only a proven refusal permits automatic retry:
-`failed`, internal errors, and transport failures remain ambiguous, even if the
-target turn ended meanwhile. `injected` is submission, not application; only
+detached replacement turn. Internal and transport errors remain ambiguous unless
+matching live or persisted user-message evidence confirms application; a missing
+history item does not prove non-delivery. `injected` is submission, not application; only
 the correlated `steer_applied` notification transfers logical output ownership.
+
+Review commands and manual `/compact` retain the ACP prompt during cancellation
+until native completion or connection closure. Cancellation during startup waits
+for the native turn id before interrupting it; an interrupt acknowledgement alone
+does not allow another prompt to start.
 
 ## Runtime options
 

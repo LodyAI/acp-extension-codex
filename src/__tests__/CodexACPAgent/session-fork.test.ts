@@ -57,11 +57,13 @@ describe("ACP session fork", () => {
             additionalDirectories: ["/workspace/extra"],
         });
         expect(threadForkSpy).toHaveBeenCalledWith({
+            excludeTurns: true,
             threadId: "source-session-id",
             lastTurnId: "completed-turn-id",
             cwd: "/workspace",
             modelProvider: "openai",
             config: {
+                features: {cwd_relative_turn_diffs: false},
                 projects: {
                     "/workspace": {trust_level: "trusted"},
                     "/workspace/extra": {trust_level: "trusted"},

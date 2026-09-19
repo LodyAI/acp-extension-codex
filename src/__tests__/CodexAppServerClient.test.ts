@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { MessageConnection } from "vscode-jsonrpc/node";
 import { CodexAppServerClient } from "../CodexAppServerClient";
-import type { TurnStartParams } from "../app-server/v2";
+import type { ReviewStartParams, TurnStartParams } from "../app-server/v2";
 import type { ServerNotification } from "../app-server";
 
 describe("CodexAppServerClient turn lifecycle", () => {
@@ -21,6 +21,7 @@ describe("CodexAppServerClient turn lifecycle", () => {
         });
         return {
             client,
+            notify: (event: ServerNotification) => notify(event),
             close: () => close(),
             start: (threadId = "thread-1", turnId = "compact-1") => notify({
                 method: "turn/started", params: {threadId, turn: turn(turnId, "inProgress")},
@@ -30,6 +31,12 @@ describe("CodexAppServerClient turn lifecycle", () => {
             }),
         };
     }
+
+    it("completes fork on the response without waiting for accounting replay", async () => {
+        const response = {thread: {id: "child"}};
+        const h = compactHarness(async () => response);
+        await expect(h.client.threadFork({threadId: "parent"})).resolves.toEqual(response);
+    });
 
     it.each(["completed", "interrupted", "failed"] as const)("settles compact from its native %s turn, even before the start ACK", async (status) => {
         let acknowledge: () => void = () => {};
@@ -121,5 +128,102 @@ describe("CodexAppServerClient turn lifecycle", () => {
         );
 
         await expect(turn).rejects.toThrow("Codex process exited before completing the turn");
+    });
+
+    it("buffers a native review start that arrives before the review response", async () => {
+        let notify: (event: ServerNotification) => void = () => {};
+        const turn = (id: string, status: "inProgress" | "interrupted") => ({
+            id, status, items: [], itemsView: "notLoaded" as const,
+            error: null, startedAt: null, completedAt: null, durationMs: null,
+        });
+        let acknowledgeReview: (response: unknown) => void = () => {};
+        const reviewResponse = new Promise<unknown>(resolve => { acknowledgeReview = resolve; });
+        const connection = {
+            onClose: () => ({dispose() {}}),
+            onDispose: () => ({dispose() {}}),
+            onUnhandledNotification: (listener: typeof notify) => { notify = listener; return {dispose() {}}; },
+            onRequest: vi.fn(),
+            sendRequest: vi.fn((method: string) => {
+                if (method === "review/start") {
+                    return reviewResponse;
+                }
+                return Promise.resolve(undefined);
+            }),
+        } as unknown as MessageConnection;
+        const client = new CodexAppServerClient(connection);
+        const started: Array<string> = [];
+        let observeStart: () => void = () => {};
+        const nativeStarted = new Promise<void>(resolve => { observeStart = resolve; });
+        const review = client.runReview(
+            {threadId: "thread-1", target: {type: "uncommittedChanges"}, delivery: "inline"} as ReviewStartParams,
+            (turnId) => { started.push(turnId); observeStart(); },
+        );
+
+        notify({method: "turn/started", params: {threadId: "thread-1", turn: turn("native-turn", "inProgress")} });
+        expect(started).toEqual([]);
+        acknowledgeReview({
+            reviewThreadId: "thread-1",
+            turn: turn("response-turn", "inProgress"),
+        });
+
+        await nativeStarted;
+        expect(started).toEqual(["native-turn"]);
+        notify({method: "turn/completed", params: {threadId: "thread-1", turn: turn("response-turn", "interrupted")} });
+
+        await expect(review).resolves.toMatchObject({
+            threadId: "thread-1",
+            turn: {id: "response-turn", status: "interrupted"},
+        });
+    });
+
+    it("does not treat an unrelated native terminal as the review completion", async () => {
+        let notify: (event: ServerNotification) => void = () => {};
+        const turn = (id: string, status: "inProgress" | "completed" | "interrupted") => ({
+            id, status, items: [], itemsView: "notLoaded" as const,
+            error: null, startedAt: null, completedAt: null, durationMs: null,
+        });
+        const connection = {
+            onClose: () => ({dispose() {}}),
+            onDispose: () => ({dispose() {}}),
+            onUnhandledNotification: (listener: typeof notify) => { notify = listener; return {dispose() {}}; },
+            onRequest: vi.fn(),
+            sendRequest: vi.fn(async (method: string) => method === "review/start"
+                ? {reviewThreadId: "thread-1", turn: turn("response-turn", "inProgress")}
+                : undefined),
+        } as unknown as MessageConnection;
+        const client = new CodexAppServerClient(connection);
+        let settled = false;
+        const review = client.runReview({
+            threadId: "thread-1", target: {type: "uncommittedChanges"}, delivery: "inline",
+        } as ReviewStartParams).then(result => { settled = true; return result; });
+
+        notify({method: "turn/started", params: {threadId: "thread-1", turn: turn("native-turn", "inProgress")} });
+        notify({method: "turn/completed", params: {threadId: "thread-1", turn: turn("other-turn", "completed")} });
+        await Promise.resolve();
+        expect(settled).toBe(false);
+        notify({method: "turn/completed", params: {threadId: "thread-1", turn: turn("response-turn", "interrupted")} });
+        await expect(review).resolves.toMatchObject({turn: {id: "response-turn", status: "interrupted"}});
+    });
+
+    it.each([false, true])("rejects review on connection closure (native start: %s)", async (started) => {
+        const h = compactHarness(async () => ({
+            reviewThreadId: "thread-1", turn: {id: "review-turn", status: "inProgress"},
+        }));
+        let registered: () => void = () => {};
+        const completionRegistered = new Promise<void>(resolve => { registered = resolve; });
+        const awaitTurnCompleted = h.client.awaitTurnCompleted.bind(h.client);
+        vi.spyOn(h.client, "awaitTurnCompleted").mockImplementation((threadId, turnId) => {
+            const result = awaitTurnCompleted(threadId, turnId);
+            registered();
+            return result;
+        });
+        const review = h.client.runReview({
+            threadId: "thread-1", target: {type: "uncommittedChanges"}, delivery: "inline",
+        });
+        const rejected = expect(review).rejects.toThrow("Codex process exited before completing the turn");
+        await completionRegistered;
+        if (started) h.start("thread-1", "native-review-turn");
+        h.close();
+        await rejected;
     });
 });

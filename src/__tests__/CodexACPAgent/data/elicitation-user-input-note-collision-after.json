@@ -1,0 +1,93 @@
+{
+  "method": "createElicitation",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "toolCallId": "request-user-input-1",
+      "mode": "form",
+      "message": "Input requested",
+      "requestedSchema": {
+        "type": "object",
+        "properties": {
+          "choice": {
+            "title": "Next step",
+            "description": "What should I do next?",
+            "_meta": {
+              "lody": {
+                "elicitation": {
+                  "version": 1,
+                  "secret": true
+                }
+              }
+            },
+            "type": "string",
+            "oneOf": [
+              {
+                "const": "Run tests",
+                "title": "Run tests",
+                "description": "Run the focused test suite."
+              },
+              {
+                "const": "Stop",
+                "title": "Stop",
+                "description": "Stop and report current status."
+              }
+            ]
+          },
+          "choice_note2": {
+            "type": "string",
+            "title": "Other",
+            "description": "Type your own answer instead of choosing an option above.",
+            "_meta": {
+              "lody": {
+                "elicitation": {
+                  "version": 1,
+                  "customAnswerFor": "choice",
+                  "secret": true
+                }
+              }
+            }
+          },
+          "choice_note": {
+            "title": "Constraints",
+            "description": "Which constraints should I follow?",
+            "_meta": {
+              "lody": {
+                "elicitation": {
+                  "version": 1,
+                  "secret": false
+                }
+              }
+            },
+            "type": "string"
+          },
+          "choice_note1": {
+            "title": "Private",
+            "description": "What private context should I consider?",
+            "_meta": {
+              "lody": {
+                "elicitation": {
+                  "version": 1,
+                  "secret": true
+                }
+              }
+            },
+            "type": "string"
+          }
+        },
+        "required": [
+          "choice_note",
+          "choice_note1"
+        ]
+      },
+      "_meta": {
+        "lody": {
+          "elicitation": {
+            "version": 1,
+            "autoResolveAfterSeconds": null
+          }
+        }
+      }
+    }
+  ]
+}

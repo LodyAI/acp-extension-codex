@@ -148,31 +148,6 @@ describe('_lody/session/steer', () => {
         await expect(followUp).resolves.toMatchObject({stopReason: "end_turn"});
     });
 
-    it('keeps a transport error ambiguous even when the native turn ends meanwhile', async () => {
-        const {mockFixture, sessionState, turnCompleted} = startActiveTurn();
-        vi.spyOn(mockFixture.getCodexAppServerClient(), "turnSteer").mockImplementation(async () => {
-            turnCompleted.resolve({
-                threadId: "session-id",
-                turn: createTurn("turn-id", "completed"),
-            });
-            await mockFixture.getCodexAcpClient().waitForSessionNotifications("session-id");
-            // Loss of the active turn is not evidence that this input was refused.
-            sessionState.currentTurnId = null;
-            throw new Error("connection closed after write");
-        });
-        const original = mockFixture.getCodexAcpAgent().prompt({
-            sessionId: "session-id",
-            prompt: [{type: "text", text: "start"}],
-        });
-        await vi.waitFor(() => expect(sessionState.currentTurnId).toBe("turn-id"));
-        await expect(mockFixture.getCodexAcpAgent().extMethod(SESSION_STEERING_METHOD, {
-            sessionId: "session-id",
-            prompt: [{type: "text", text: "may already be consumed"}],
-            steerId: "ambiguous",
-        })).resolves.toEqual({outcome: "failed"});
-        await original;
-    });
-
     it('rejects concurrent late steering requests without creating a turn', async () => {
         const mockFixture = createCodexMockTestFixture();
         const sessionState = createTestSessionState();
@@ -203,7 +178,7 @@ describe('_lody/session/steer', () => {
         expect(turnSteerSpy).not.toHaveBeenCalled();
     });
 
-    it('reports failed instead of throwing when steering hits an unexpected error', async () => {
+    it('does not report a replay-safe failure for an unknown steering error', async () => {
         const mockFixture = createCodexMockTestFixture();
         vi.spyOn(mockFixture.getCodexAcpAgent(), "getSessionState").mockImplementation(() => {
             throw new Error("unexpected boom");
@@ -213,7 +188,7 @@ describe('_lody/session/steer', () => {
             sessionId: "session-id",
             prompt: [{type: "text", text: "keep the agent alive"}],
             steerId: "steer-error",
-        })).resolves.toEqual({outcome: "failed"});
+        })).rejects.toThrow("unexpected boom");
     });
 
     it('rejects malformed steer params', async () => {

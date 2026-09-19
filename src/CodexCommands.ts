@@ -27,7 +27,9 @@ type ParsedSlashCommand = {
 
 export type CommandHandleResult =
     | { handled: false, prompt?: acp.ContentBlock[] }
-    | { handled: true, turnCompleted?: TurnCompletedNotification };
+    // Review completion is authoritative for the standalone command; it must
+    // not be reinterpreted as an active goal continuation by the prompt layer.
+    | { handled: true, turnCompleted?: TurnCompletedNotification, waitForGoalContinuation?: boolean };
 
 /** Codex rejects longer objectives; fail before spending a turn on it. */
 const GOAL_OBJECTIVE_MAX_LENGTH = 4000;
@@ -56,8 +58,8 @@ export function resolveGoalCommandHandleResult(
 export type CommandHandleOptions = {
     onTurnStartPending?: () => void;
     onTurnStarted?: (turnId: string, threadId: string) => void;
-    onCompactionStarted?: () => void;
-    onCompactionFinished?: () => void;
+    onNativeCommandStarted?: () => void;
+    onNativeCommandFinished?: () => void;
     setConfigOption?: (configId: string, value: string | boolean) => Promise<void>;
 };
 
@@ -267,7 +269,7 @@ export class CodexCommands {
             }
             case "compact": {
                 options.onTurnStartPending?.();
-                options.onCompactionStarted?.();
+                options.onNativeCommandStarted?.();
                 try {
                     const turnCompleted = await this.runWithProcessCheck(() =>
                         this.codexAcpClient.runCompact(sessionId, (turnId) => {
@@ -276,7 +278,7 @@ export class CodexCommands {
                     );
                     return { handled: true, turnCompleted };
                 } finally {
-                    options.onCompactionFinished?.();
+                    options.onNativeCommandFinished?.();
                 }
             }
             case "goal": {
@@ -285,7 +287,7 @@ export class CodexCommands {
             case "review": {
                 const target = this.buildReviewTarget(command.rest);
                 const turnCompleted = await this.runReviewCommand(sessionState, target, options);
-                return { handled: true, turnCompleted };
+                return { handled: true, turnCompleted, waitForGoalContinuation: false };
             }
             case "review-branch": {
                 if (command.rest.length === 0) {
@@ -296,7 +298,7 @@ export class CodexCommands {
                     type: "baseBranch",
                     branch: command.rest,
                 }, options);
-                return { handled: true, turnCompleted };
+                return { handled: true, turnCompleted, waitForGoalContinuation: false };
             }
             case "review-commit": {
                 if (command.rest.length === 0) {
@@ -308,7 +310,7 @@ export class CodexCommands {
                     sha: command.rest,
                     title: null,
                 }, options);
-                return { handled: true, turnCompleted };
+                return { handled: true, turnCompleted, waitForGoalContinuation: false };
             }
             case "status": {
                 await this.refreshRateLimits(sessionState);
@@ -372,13 +374,18 @@ export class CodexCommands {
         options: CommandHandleOptions,
     ): Promise<TurnCompletedNotification> {
         options.onTurnStartPending?.();
-        return await this.runWithProcessCheck(() => this.codexAcpClient.runReview(
-            sessionState.sessionId,
-            target,
-            (turnId, threadId) => {
-                this.handleCommandTurnStarted(sessionState, options, turnId, threadId);
-            },
-        ));
+        options.onNativeCommandStarted?.();
+        try {
+            return await this.runWithProcessCheck(() => this.codexAcpClient.runReview(
+                sessionState.sessionId,
+                target,
+                (turnId, threadId) => {
+                    this.handleCommandTurnStarted(sessionState, options, turnId, threadId);
+                },
+            ));
+        } finally {
+            options.onNativeCommandFinished?.();
+        }
     }
 
     private async runGoalCommand(
