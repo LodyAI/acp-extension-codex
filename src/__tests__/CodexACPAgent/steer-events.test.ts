@@ -96,15 +96,15 @@ describe('_lody/session/steer', () => {
             sessionId: "session-id",
             prompt: [{type: "text", text: "too late for the previous turn"}],
             steerId: "steer-idle",
-        })).resolves.toEqual({outcome: "failed"});
+        })).rejects.toMatchObject({code: -32600});
 
         expect(turnStartSpy).not.toHaveBeenCalled();
     });
 
-    it('fails when Codex reports that the tracked turn is no longer active', async () => {
+    it('refuses an ended native turn and lets the client send the input as a normal follow-up', async () => {
         const {mockFixture, sessionState, turnCompleted} = startActiveTurn();
         const nextTurnCompleted = deferred<TurnCompletedNotification>();
-        vi.spyOn(mockFixture.getCodexAppServerClient(), "turnStart")
+        const turnStart = vi.spyOn(mockFixture.getCodexAppServerClient(), "turnStart")
             .mockResolvedValueOnce({turn: createTurn("turn-id", "inProgress")})
             .mockResolvedValueOnce({turn: createTurn("new-turn-id", "inProgress")});
         vi.spyOn(mockFixture.getCodexAppServerClient(), "awaitTurnCompleted")
@@ -132,9 +132,20 @@ describe('_lody/session/steer', () => {
             sessionId: "session-id",
             prompt: [{type: "text", text: "racing follow-up"}],
             steerId: "steer-race",
-        })).resolves.toEqual({outcome: "failed"});
+        })).rejects.toMatchObject({code: -32600});
         await expect(promptPromise).resolves.toMatchObject({stopReason: "end_turn"});
         expect(sessionState.currentTurnId).toBeNull();
+        expect(turnStart).toHaveBeenCalledTimes(1);
+        const followUp = mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{type: "text", text: "racing follow-up"}],
+        });
+        await vi.waitFor(() => expect(turnStart).toHaveBeenCalledTimes(2));
+        nextTurnCompleted.resolve({
+            threadId: "session-id",
+            turn: createTurn("new-turn-id", "completed"),
+        });
+        await expect(followUp).resolves.toMatchObject({stopReason: "end_turn"});
     });
 
     it('rejects concurrent late steering requests without creating a turn', async () => {
@@ -160,9 +171,9 @@ describe('_lody/session/steer', () => {
             steerId: "steer-late-2",
         });
 
-        await expect(Promise.all([firstRequest, secondRequest])).resolves.toEqual([
-            {outcome: "failed"},
-            {outcome: "failed"},
+        await expect(Promise.allSettled([firstRequest, secondRequest])).resolves.toEqual([
+            {status: "rejected", reason: expect.objectContaining({code: -32600})},
+            {status: "rejected", reason: expect.objectContaining({code: -32600})},
         ]);
         expect(turnSteerSpy).not.toHaveBeenCalled();
     });

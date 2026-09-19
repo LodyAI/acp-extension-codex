@@ -1662,8 +1662,8 @@ export class CodexAcpServer {
                 throw error;
             }
             logger.error(`Steering request for session ${params.sessionId} failed`, error);
-            // `failed` is a delivery verdict: callers may safely replay it as
-            // an ordinary prompt. An unexpected adapter failure cannot prove
+            // Only an explicit refusal authorizes ordinary-prompt replay.
+            // An unexpected adapter failure cannot prove
             // whether app-server accepted the steer, so preserve that
             // ambiguity by rejecting the request instead.
             throw error;
@@ -1712,7 +1712,7 @@ export class CodexAcpServer {
                 return {outcome: "injected"};
             }
         }
-        return {outcome: "failed"};
+        throw RequestError.invalidRequest("No active Codex turn to steer");
     }
 
     /**

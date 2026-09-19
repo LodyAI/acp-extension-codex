@@ -64,9 +64,9 @@
   thread id, turn id, and `clientId = clientUserMessageId`. Retain in-flight identity
   through prompt completion and bounded error reconciliation; live/history evidence
   emits one acknowledgement. Never emulate steer with a second `turn/start`.
-- A steering response of `failed` is replay-safe and therefore means the adapter proved the input
-  was not applied. Reject unexpected or transport-ambiguous failures so the host preserves an
-  unknown-delivery state instead of replaying the input.
+- Acknowledged steer is inject-or-refuse: use JSON-RPC `invalid request` (`-32600`)
+  for proven non-delivery so Lody can requeue the same message as a normal prompt.
+  Preserve unexpected or transport-ambiguous errors; they never authorize replay.
 - Turn completion, cancellation, missing history, and history-read failures are not
   proof of steer non-delivery. Reconciliation reads history once without resuming or
   resending; it does not provide cross-restart recovery or idempotency.
