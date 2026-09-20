@@ -2,6 +2,7 @@ import {mkdir, mkdtemp, realpath, rm, symlink} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
+import {ErrorCodes, ResponseError} from "vscode-jsonrpc/node";
 import {createCodexMockTestFixture, createTestModel} from "../acp-test-utils";
 import {readWorktreeProject, WorktreeProjects} from "../../WorktreeProject";
 
@@ -35,6 +36,12 @@ describe("local project identity across worktrees", () => {
     function mockProjectCreate(projectId = "adapter-project") {
         return vi.spyOn(fixture.getCodexAppServerClient(), "projectCreate")
             .mockResolvedValue({project: {id: projectId}});
+    }
+    function deletedProjectError(idempotencyKey: string) {
+        return new ResponseError(
+            ErrorCodes.InternalError,
+            `failed to run project/create: internal state error: idempotency key refers to deleted project: ${idempotencyKey}`,
+        );
     }
 
     it("starts in the worktree with the deterministic native project", async () => {
@@ -177,16 +184,108 @@ describe("local project identity across worktrees", () => {
         expect(update).toHaveBeenCalledWith({threadId: "fork-child", projectId: "adapter-project"});
     });
 
-    it("preserves a deleted idempotency target error without root guessing", async () => {
+    it("reuses the backward-compatible generation-0 project", async () => {
+        const native = fixture.getCodexAppServerClient();
+        const create = vi.spyOn(native, "projectCreate").mockResolvedValue({project: {id: "generation-zero"}});
+        const resolver = new WorktreeProjects(native);
+        await expect(resolver.resolve({version: 1, originProjectPath: root})).resolves.toBe("generation-zero");
+        await expect(resolver.resolve({version: 1, originProjectPath: root})).resolves.toBe("generation-zero");
+        expect(create).toHaveBeenCalledTimes(2);
+        const keys = create.mock.calls.map(([params]) => params.idempotencyKey);
+        expect(new Set(keys).size).toBe(1);
+        expect(keys[0]).toMatch(/^acp-project-v1:[0-9a-f]{64}$/);
+    });
+
+    it("recovers a generation-0 tombstone through generation 1 without root guessing", async () => {
         const native = fixture.getCodexAppServerClient();
         const projectList = vi.fn().mockResolvedValue({data: [{id: "user-project", roots: [{path: root}]}]});
         Object.assign(native, {projectList});
-        const create = vi.spyOn(native, "projectCreate")
-            .mockRejectedValue(new Error("idempotency key refers to deleted project"));
+        const create = vi.spyOn(native, "projectCreate").mockImplementation(async params => {
+            if (!params.idempotencyKey.endsWith(":g1")) throw deletedProjectError(params.idempotencyKey);
+            return {project: {id: "generation-one"}};
+        });
         await expect(new WorktreeProjects(native).resolve({version: 1, originProjectPath: root}))
-            .rejects.toThrow("idempotency key refers to deleted project");
-        expect(create).toHaveBeenCalledOnce();
+            .resolves.toBe("generation-one");
+        expect(create.mock.calls.map(([params]) => params.idempotencyKey)).toEqual([
+            expect.stringMatching(/^acp-project-v1:[0-9a-f]{64}$/),
+            expect.stringMatching(/^acp-project-v1:[0-9a-f]{64}:g1$/),
+        ]);
         expect(projectList).not.toHaveBeenCalled();
+    });
+
+    it("advances across consecutive tombstones to the first live generation", async () => {
+        const native = fixture.getCodexAppServerClient();
+        const create = vi.spyOn(native, "projectCreate").mockImplementation(async params => {
+            if (!params.idempotencyKey.endsWith(":g3")) throw deletedProjectError(params.idempotencyKey);
+            return {project: {id: "generation-three"}};
+        });
+        await expect(new WorktreeProjects(native).resolve({version: 1, originProjectPath: root}))
+            .resolves.toBe("generation-three");
+        expect(create.mock.calls.map(([params]) => params.idempotencyKey.replace(/^acp-project-v1:[0-9a-f]{64}/, "g0")))
+            .toEqual(["g0", "g0:g1", "g0:g2", "g0:g3"]);
+    });
+
+    it("converges independent adapters on one recovered native project", async () => {
+        const native = fixture.getCodexAppServerClient();
+        const projects = new Map<string, string>();
+        const create = vi.spyOn(native, "projectCreate").mockImplementation(async params => {
+            if (!params.idempotencyKey.endsWith(":g1")) throw deletedProjectError(params.idempotencyKey);
+            let projectId = projects.get(params.idempotencyKey);
+            if (!projectId) {
+                projectId = "shared-generation-one";
+                projects.set(params.idempotencyKey, projectId);
+            }
+            return {project: {id: projectId}};
+        });
+        const ids = await Promise.all([
+            new WorktreeProjects(native).resolve({version: 1, originProjectPath: root}),
+            new WorktreeProjects(native).resolve({version: 1, originProjectPath: root}),
+        ]);
+        expect(ids).toEqual(["shared-generation-one", "shared-generation-one"]);
+        expect(projects.size).toBe(1);
+        expect(create).toHaveBeenCalledTimes(4);
+    });
+
+    it("finds the same current generation after resolver restart without a cache", async () => {
+        const native = fixture.getCodexAppServerClient();
+        const create = vi.spyOn(native, "projectCreate").mockImplementation(async params => {
+            if (!params.idempotencyKey.endsWith(":g1")) throw deletedProjectError(params.idempotencyKey);
+            return {project: {id: "current-generation"}};
+        });
+        await expect(new WorktreeProjects(native).resolve({version: 1, originProjectPath: root}))
+            .resolves.toBe("current-generation");
+        await expect(new WorktreeProjects(native).resolve({version: 1, originProjectPath: root}))
+            .resolves.toBe("current-generation");
+        expect(create.mock.calls.map(([params]) => params.idempotencyKey.endsWith(":g1") ? "g1" : "g0"))
+            .toEqual(["g0", "g1", "g0", "g1"]);
+    });
+
+    it("propagates unrelated project creation failures without advancing", async () => {
+        const native = fixture.getCodexAppServerClient();
+        const error = new ResponseError(ErrorCodes.InternalError, "failed to run project/create: disk is full");
+        const create = vi.spyOn(native, "projectCreate").mockRejectedValue(error);
+        await expect(new WorktreeProjects(native).resolve({version: 1, originProjectPath: root}))
+            .rejects.toBe(error);
+        expect(create).toHaveBeenCalledOnce();
+    });
+
+    it("does not treat an untyped lookalike failure as a Codex tombstone", async () => {
+        const native = fixture.getCodexAppServerClient();
+        const error = new Error("idempotency key refers to deleted project");
+        const create = vi.spyOn(native, "projectCreate").mockRejectedValue(error);
+        await expect(new WorktreeProjects(native).resolve({version: 1, originProjectPath: root}))
+            .rejects.toBe(error);
+        expect(create).toHaveBeenCalledOnce();
+    });
+
+    it("fails clearly after exhausting the bounded generation sequence", async () => {
+        const native = fixture.getCodexAppServerClient();
+        const create = vi.spyOn(native, "projectCreate").mockImplementation(async params => {
+            throw deletedProjectError(params.idempotencyKey);
+        });
+        await expect(new WorktreeProjects(native).resolve({version: 1, originProjectPath: root}))
+            .rejects.toThrow("Codex project recovery exhausted generations 0 through 32");
+        expect(create).toHaveBeenCalledTimes(33);
     });
 
     it("leaves clients without project metadata unchanged", async () => {

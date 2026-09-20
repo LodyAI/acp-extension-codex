@@ -25,9 +25,11 @@ Lifecycle rules are deliberately asymmetric:
   assignment and only backfills an unassigned child.
 
 Codex retains idempotency keys when projects are deleted. Replaying a tombstoned
-key fails with `idempotency key refers to deleted project`. The adapter preserves
-that failure and does not recover by matching roots or inventing another identity;
-deletion recovery remains a separate design problem.
+key fails with `idempotency key refers to deleted project`. Deletion recovery is
+implemented as a deterministic generation sequence: generation 0 retains the
+original key, while later generations append `:g1`, `:g2`, and so on. Every adapter
+process probes the same sequence and relies on Codex idempotency to converge. The
+adapter still does not recover by matching roots or persist a native binding.
 
 Source verification used the pinned `rust-v0.154.0` implementation in
 `app-server/src/request_processors/projects.rs`, `state/src/runtime/projects.rs`,

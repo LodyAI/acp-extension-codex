@@ -153,8 +153,11 @@ The adapter derives a deterministic native project identity from the canonical
 Lody project root and relies on Codex `project/create` idempotency for persistence
 across sessions and adapter processes. It does not inspect or reuse user-created
 projects by root, so multiple Codex projects may share that folder without making
-Lody resolution ambiguous. If the idempotency target was deleted, the native Codex
-error is preserved; the adapter does not guess a replacement from matching roots.
+Lody resolution ambiguous. If an adapter-owned project was deleted, the adapter
+advances through a bounded sequence of deterministic generation keys (`:g1`, `:g2`,
+and so on) until Codex creates or returns the first live generation. It never guesses
+a replacement from matching roots, and generation 0 keeps the original key for
+compatibility.
 
 New sessions receive the deterministic project directly in `thread/start`.
 Existing native thread project assignments remain authoritative on load, resume,
