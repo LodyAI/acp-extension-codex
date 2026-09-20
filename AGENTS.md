@@ -95,6 +95,7 @@
 - Core `worktreeProject` derives a deterministic native project idempotency key from
   the canonical logical root. Let Codex persist that identity through `project/create`;
   never infer it from user project roots or add adapter-side bindings. Existing native
-  assignments are authoritative on load, resume, and fork. Project protocol fields
-  omitted by stable generation live in `ProjectApi.ts`, based on the pinned runtime's
-  experimental schema.
+  assignments are authoritative on load, resume, and fork. Recover deleted adapter-owned
+  projects by probing deterministic `:gN` idempotency generations; only Codex's specific
+  tombstone error advances a generation. Project protocol fields omitted by stable
+  generation live in `ProjectApi.ts`, based on the pinned runtime's experimental schema.

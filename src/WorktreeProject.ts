@@ -3,8 +3,11 @@ import {realpath} from "node:fs/promises";
 import path from "node:path";
 import {RequestError} from "@agentclientprotocol/sdk";
 import type {LodyWorktreeProject} from "acp-extension-core";
+import {ErrorCodes, ResponseError} from "vscode-jsonrpc/node";
 import type {CodexAppServerClient} from "./CodexAppServerClient";
 import type {Thread} from "./app-server/v2";
+
+const MAX_PROJECT_IDENTITY_GENERATION = 32;
 
 export function readWorktreeProject(meta: unknown): LodyWorktreeProject | undefined {
     if (typeof meta !== "object" || meta === null) return undefined;
@@ -30,14 +33,26 @@ export class WorktreeProjects {
         if (!project) return undefined;
         const originProjectPath = await realpath(project.originProjectPath);
         const key = projectRootKey(originProjectPath);
-        // Codex persists this key as the native project identity. If its target was
-        // deleted, preserve Codex's tombstone error instead of guessing by root.
-        const response = await this.client.projectCreate({
-            idempotencyKey: `acp-project-v1:${createHash("sha256").update(key).digest("hex")}`,
-            name: path.basename(originProjectPath) || originProjectPath,
-            roots: [{path: originProjectPath}],
-        });
-        return response.project.id;
+        const baseIdempotencyKey = `acp-project-v1:${createHash("sha256").update(key).digest("hex")}`;
+        for (let generation = 0; generation <= MAX_PROJECT_IDENTITY_GENERATION; generation++) {
+            const idempotencyKey = generation === 0
+                ? baseIdempotencyKey
+                : `${baseIdempotencyKey}:g${generation}`;
+            try {
+                const response = await this.client.projectCreate({
+                    idempotencyKey,
+                    name: path.basename(originProjectPath) || originProjectPath,
+                    roots: [{path: originProjectPath}],
+                });
+                return response.project.id;
+            } catch (error) {
+                if (!isDeletedIdempotencyProject(error, idempotencyKey)) throw error;
+            }
+        }
+        throw RequestError.internalError(
+            {originProjectPath, maxGeneration: MAX_PROJECT_IDENTITY_GENERATION},
+            `Codex project recovery for ${originProjectPath} exhausted generations 0 through ${MAX_PROJECT_IDENTITY_GENERATION}`,
+        );
     }
 
     async backfill(thread: Thread, project: LodyWorktreeProject | undefined): Promise<void> {
@@ -52,4 +67,10 @@ export class WorktreeProjects {
 function projectRootKey(originProjectPath: string): string {
     const normalized = path.resolve(originProjectPath);
     return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+}
+
+function isDeletedIdempotencyProject(error: unknown, idempotencyKey: string): boolean {
+    return error instanceof ResponseError
+        && error.code === ErrorCodes.InternalError
+        && error.message.includes(`idempotency key refers to deleted project: ${idempotencyKey}`);
 }
