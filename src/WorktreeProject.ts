@@ -43,13 +43,13 @@ export class WorktreeProjects {
 
     private async findOrCreate(originProjectPath: string, key: string): Promise<string> {
         let cursor: string | undefined;
-        const matches = new Set<string>();
+        const matches = new Map<string, string>();
         do {
             const page = await this.client.projectList({limit: 100, ...(cursor ? {cursor} : {})});
             for (const project of page.data) {
                 for (const root of project.roots) {
                     if (projectRootKey(root.path) === key || await this.matchesRoot(root.path, key)) {
-                        matches.add(project.id);
+                        matches.set(project.id, project.name);
                         break;
                     }
                 }
@@ -57,9 +57,11 @@ export class WorktreeProjects {
             cursor = page.nextCursor ?? undefined;
         } while (cursor);
         if (matches.size > 1) {
-            throw RequestError.invalidParams(undefined, "Multiple Codex projects use this root; consolidate the project assignments first");
+            const projects = Array.from(matches, ([id, name]) => `- ${name} (${id})`).join("\n");
+            throw RequestError.invalidParams(undefined,
+                `Multiple Codex projects use the same root:\n${originProjectPath}\nMatching projects:\n${projects}\nRemove the duplicate root assignment in Codex, then try again.`);
         }
-        const match = matches.values().next().value;
+        const match = matches.keys().next().value;
         if (match) return match;
         // Shared by independent adapter processes. Do not use a per-session/worktree id.
         const idempotencyKey = `acp-project-v1:${createHash("sha256").update(key).digest("hex")}`;
