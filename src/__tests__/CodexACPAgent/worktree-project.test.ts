@@ -35,7 +35,7 @@ describe("local project identity across worktrees", () => {
     function existingProject() {
         const native = fixture.getCodexAppServerClient();
         vi.spyOn(native, "projectList").mockResolvedValue({
-            data: [{id: "original-project", roots: [{path: root}]}], nextCursor: null,
+            data: [{id: "original-project", name: "Original", roots: [{path: root}]}], nextCursor: null,
         });
         // Reusing a project must not create a second project.
         vi.spyOn(native, "projectCreate").mockRejectedValue(new Error("unexpected project creation"));
@@ -63,7 +63,7 @@ describe("local project identity across worktrees", () => {
         const requests: unknown[] = [];
         vi.spyOn(native, "projectCreate").mockImplementation(async params => {
             requests.push(params);
-            return {project: {id: params.idempotencyKey, roots: params.roots}};
+            return {project: {id: params.idempotencyKey, name: params.name, roots: params.roots}};
         });
         const alias = path.join(root, "alias");
         await symlink(root, alias, "dir");
@@ -85,7 +85,7 @@ describe("local project identity across worktrees", () => {
         const native = fixture.getCodexAppServerClient();
         vi.spyOn(native, "projectList").mockResolvedValue({data: [], nextCursor: null});
         vi.spyOn(native, "projectCreate").mockImplementation(async params => ({
-            project: {id: params.idempotencyKey, roots: params.roots},
+            project: {id: params.idempotencyKey, name: params.name, roots: params.roots},
         }));
         const roots = [path.join(root, "source"), path.join(root, "source ")];
         await Promise.all(roots.map(originProjectPath => mkdir(originProjectPath)));
@@ -99,8 +99,8 @@ describe("local project identity across worktrees", () => {
         await symlink(root, alias, "dir");
         const native = fixture.getCodexAppServerClient();
         vi.spyOn(native, "projectList").mockImplementation(async params => params.cursor === "next"
-            ? {data: [{id: "existing", roots: [{path: alias}]}], nextCursor: null}
-            : {data: [{id: "other", roots: [{path: path.join(root, "deleted")}]}], nextCursor: "next"});
+            ? {data: [{id: "existing", name: "Existing", roots: [{path: alias}]}], nextCursor: null}
+            : {data: [{id: "other", name: "Other", roots: [{path: path.join(root, "deleted")}]}], nextCursor: "next"});
         await expect(new WorktreeProjects(native).resolve({version: 1, originProjectPath: root})).resolves.toBe("existing");
     });
 
@@ -163,9 +163,17 @@ describe("local project identity across worktrees", () => {
     it("rejects ambiguous roots instead of assigning an arbitrary project", async () => {
         const native = fixture.getCodexAppServerClient();
         vi.spyOn(native, "projectList").mockResolvedValue({data: [
-            {id: "one", roots: [{path: root}]}, {id: "two", roots: [{path: root}]},
+            {id: "one", name: "Example", roots: [{path: root}]},
+            {id: "two", name: "Projects", roots: [{path: root}]},
         ], nextCursor: null});
-        await expect(new WorktreeProjects(native).resolve({version: 1, originProjectPath: root})).rejects.toThrow("Multiple Codex projects");
+        await expect(new WorktreeProjects(native).resolve({version: 1, originProjectPath: root})).rejects.toThrow([
+            "Multiple Codex projects use the same root:",
+            root,
+            "Matching projects:",
+            "- Example (one)",
+            "- Projects (two)",
+            "Remove the duplicate root assignment in Codex, then try again.",
+        ].join("\n"));
     });
 
     it.each([null, {version: 2, originProjectPath: "/project"}, {version: 1, originProjectPath: "relative"}])("rejects invalid project metadata %j", value => {
