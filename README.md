@@ -147,14 +147,19 @@ The adapter advertises Core `worktreeProject: { version: 1 }`. Clients can attac
 `_meta.lody.worktreeProject: { version: 1, originProjectPath: "/original/project" }` when
 creating, loading, resuming, or forking a session, while passing the actual
 worktree path as ACP `cwd`. This requires the project APIs in the pinned Codex
-0.153.4 runtime; older `CODEX_PATH` overrides may not support them.
+0.154.0 runtime; older `CODEX_PATH` overrides may not support them.
 
-The adapter canonicalizes the root, reuses a matching Codex project, or creates
-one with a root-derived idempotency key shared by concurrent adapter processes.
-Multiple matching projects are rejected as ambiguous. New sessions and fork
-children receive the project assignment; resumed/loaded sessions receive it only
-when unassigned, preserving existing user choices. Already persisted sessions are
-backfilled when reopened; there is no bulk migration of unrelated history.
+The adapter derives a deterministic native project identity from the canonical
+Lody project root and relies on Codex `project/create` idempotency for persistence
+across sessions and adapter processes. It does not inspect or reuse user-created
+projects by root, so multiple Codex projects may share that folder without making
+Lody resolution ambiguous. If the idempotency target was deleted, the native Codex
+error is preserved; the adapter does not guess a replacement from matching roots.
+
+New sessions receive the deterministic project directly in `thread/start`.
+Existing native thread project assignments remain authoritative on load, resume,
+and fork; only unassigned threads are backfilled. Already persisted sessions are
+backfilled when reopened, and there is no bulk migration of unrelated history.
 
 Grouping keeps execution, permissions, and worktree cleanup with their existing
 owners. It does not enable Codex-managed worktree badges or Handoff. Standard

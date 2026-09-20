@@ -85,7 +85,7 @@ describe("ACP session fork", () => {
 
     it("unsubscribes the child only when install fails after thread/fork", async () => {
         const threadUnsubscribe = vi.fn().mockResolvedValue({status: "unsubscribed"});
-        const assignError = new Error("assign failed");
+        const backfillError = new Error("backfill failed");
         await expect(
             forkSession(
                 {sessionId: "source-session-id", cwd: "/workspace", mcpServers: []},
@@ -101,7 +101,7 @@ describe("ACP session fork", () => {
                         }),
                         threadUnsubscribe,
                     } as never,
-                    assignProject: vi.fn().mockRejectedValue(assignError),
+                    backfillProject: vi.fn().mockRejectedValue(backfillError),
                     refreshSkills: vi.fn().mockResolvedValue(undefined),
                     createSessionConfig: vi.fn().mockResolvedValue({}),
                     getResumeModelProvider: vi.fn().mockResolvedValue("openai"),
@@ -110,7 +110,7 @@ describe("ACP session fork", () => {
                     getCollaborationMode: vi.fn(),
                 },
             ),
-        ).rejects.toBe(assignError);
+        ).rejects.toBe(backfillError);
         expect(threadUnsubscribe).toHaveBeenCalledTimes(1);
         expect(threadUnsubscribe).toHaveBeenCalledWith({threadId: "child-session-id"});
     });

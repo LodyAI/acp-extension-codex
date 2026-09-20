@@ -1,6 +1,5 @@
 import type {
-    CodexProjectRequest, ProjectListParams, ProjectListResponse,
-    ProjectCreateParams, ProjectCreateResponse, ThreadProjectUpdateParams,
+    CodexProjectRequest, ProjectCreateParams, ProjectCreateResponse, ThreadProjectUpdateParams,
 } from "./ProjectApi";
 import {type MessageConnection, RequestType} from "vscode-jsonrpc/node";
 import type {
@@ -644,10 +643,6 @@ export class CodexAppServerClient {
         const threadStaleTurns = this.staleTurnIds.get(threadId) ?? new Set<string>();
         threadStaleTurns.add(turnId);
         this.staleTurnIds.set(threadId, threadStaleTurns);
-    }
-
-    async projectList(params: ProjectListParams): Promise<ProjectListResponse> {
-        return await this.sendRequest({method: "project/list", params});
     }
 
     async projectCreate(params: ProjectCreateParams): Promise<ProjectCreateResponse> {

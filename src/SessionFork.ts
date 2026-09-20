@@ -13,7 +13,7 @@ import {getLodyForkTurnId} from "./AcpExtensions";
 
 export type SessionForkDependencies = {
     codexClient: CodexAppServerClient;
-    assignProject(thread: Thread, project: LodyWorktreeProject | undefined): Promise<void>;
+    backfillProject(thread: Thread, project: LodyWorktreeProject | undefined): Promise<void>;
     refreshSkills(cwd: string, additionalDirectories: string[]): Promise<void>;
     createSessionConfig(
         cwd: string,
@@ -50,7 +50,7 @@ export async function forkSession(
     // notifications, so a live fork session must stay subscribed. Unsubscribe
     // only if we fail before returning it; closeSession still unsubscribes.
     try {
-        await dependencies.assignProject(response.thread, project);
+        await dependencies.backfillProject(response.thread, project);
     } catch (error) {
         await dependencies.codexClient.threadUnsubscribe({threadId: response.thread.id});
         throw error;
