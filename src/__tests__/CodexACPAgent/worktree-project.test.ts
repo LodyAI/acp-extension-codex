@@ -32,24 +32,25 @@ describe("local project identity across worktrees", () => {
             model: "model-id", modelProvider: "openai", reasoningEffort: "medium", serviceTier: null,
         };
     }
-    function existingProject() {
-        const native = fixture.getCodexAppServerClient();
-        vi.spyOn(native, "projectList").mockResolvedValue({
-            data: [{id: "original-project", name: "Original", roots: [{path: root}]}], nextCursor: null,
-        });
-        // Reusing a project must not create a second project.
-        vi.spyOn(native, "projectCreate").mockRejectedValue(new Error("unexpected project creation"));
+    function mockProjectCreate(projectId = "adapter-project") {
+        return vi.spyOn(fixture.getCodexAppServerClient(), "projectCreate")
+            .mockResolvedValue({project: {id: projectId}});
     }
 
-    it("starts in the worktree while assigning its existing original project", async () => {
-        existingProject();
+    it("starts in the worktree with the deterministic native project", async () => {
+        const create = mockProjectCreate();
         const native = fixture.getCodexAppServerClient();
-        const start = vi.spyOn(native, "threadStart").mockResolvedValue(resumed("original-project") as never);
+        const start = vi.spyOn(native, "threadStart").mockResolvedValue(resumed("adapter-project") as never);
         const cwd = path.join(root, "worktree");
         const result = await fixture.getCodexAcpClient().newSession({cwd, mcpServers: [], _meta: metadata()});
         expect(result.sessionId).toBe("thread-1");
+        expect(create).toHaveBeenCalledWith({
+            idempotencyKey: expect.stringMatching(/^acp-project-v1:[0-9a-f]{64}$/),
+            name: path.basename(root),
+            roots: [{path: root}],
+        });
         expect(start).toHaveBeenCalledWith({
-            cwd, projectId: "original-project", modelProvider: null,
+            cwd, projectId: "adapter-project", modelProvider: null,
             config: {
                 features: {cwd_relative_turn_diffs: false},
                 projects: {[cwd]: {trust_level: "trusted"}},
@@ -57,13 +58,18 @@ describe("local project identity across worktrees", () => {
         });
     });
 
-    it("creates one canonical project identity across symlinks and independent adapters", async () => {
+    it("gets one native identity for canonical aliases across adapter instances", async () => {
         const native = fixture.getCodexAppServerClient();
-        vi.spyOn(native, "projectList").mockResolvedValue({data: [], nextCursor: null});
-        const requests: unknown[] = [];
+        const projects = new Map<string, string>();
+        const requests: Array<{idempotencyKey: string; name: string; roots: Array<{path: string}>}> = [];
         vi.spyOn(native, "projectCreate").mockImplementation(async params => {
             requests.push(params);
-            return {project: {id: params.idempotencyKey, name: params.name, roots: params.roots}};
+            let projectId = projects.get(params.idempotencyKey);
+            if (!projectId) {
+                projectId = `native-project-${projects.size + 1}`;
+                projects.set(params.idempotencyKey, projectId);
+            }
+            return {project: {id: projectId}};
         });
         const alias = path.join(root, "alias");
         await symlink(root, alias, "dir");
@@ -74,18 +80,16 @@ describe("local project identity across worktrees", () => {
             first.resolve({version: 1, originProjectPath: alias}),
             second.resolve({version: 1, originProjectPath: root}),
         ]);
-        expect(new Set(ids).size).toBe(1);
-        expect(requests).toEqual(expect.arrayContaining([{
-            idempotencyKey: ids[0], name: path.basename(root), roots: [{path: root}],
-        }]));
-        expect(requests.every(request => JSON.stringify(request) === JSON.stringify(requests[0]))).toBe(true);
+        expect(ids).toEqual(["native-project-1", "native-project-1", "native-project-1"]);
+        expect(new Set(requests.map(request => request.idempotencyKey)).size).toBe(1);
+        expect(requests.every(request => request.name === path.basename(root)
+            && request.roots[0]?.path === root)).toBe(true);
     });
 
-    it("keeps distinct directory names that differ by trailing whitespace separate", async () => {
+    it("keeps distinct canonical roots that differ by trailing whitespace separate", async () => {
         const native = fixture.getCodexAppServerClient();
-        vi.spyOn(native, "projectList").mockResolvedValue({data: [], nextCursor: null});
         vi.spyOn(native, "projectCreate").mockImplementation(async params => ({
-            project: {id: params.idempotencyKey, name: params.name, roots: params.roots},
+            project: {id: params.idempotencyKey},
         }));
         const roots = [path.join(root, "source"), path.join(root, "source ")];
         await Promise.all(roots.map(originProjectPath => mkdir(originProjectPath)));
@@ -94,63 +98,103 @@ describe("local project identity across worktrees", () => {
         expect(ids[0]).not.toEqual(ids[1]);
     });
 
-    it("finds a registered project on a later page using its symlink root", async () => {
-        const alias = path.join(root, "alias");
-        await symlink(root, alias, "dir");
+    it("ignores user projects that share the canonical root", async () => {
         const native = fixture.getCodexAppServerClient();
-        vi.spyOn(native, "projectList").mockImplementation(async params => params.cursor === "next"
-            ? {data: [{id: "existing", name: "Existing", roots: [{path: alias}]}], nextCursor: null}
-            : {data: [{id: "other", name: "Other", roots: [{path: path.join(root, "deleted")}]}], nextCursor: "next"});
-        await expect(new WorktreeProjects(native).resolve({version: 1, originProjectPath: root})).resolves.toBe("existing");
+        const projectList = vi.fn().mockResolvedValue({data: [
+            {id: "user-one", roots: [{path: root}]},
+            {id: "user-two", roots: [{path: root}]},
+        ], nextCursor: null});
+        Object.assign(native, {projectList});
+        mockProjectCreate("adapter-owned");
+        await expect(new WorktreeProjects(native).resolve({version: 1, originProjectPath: root}))
+            .resolves.toBe("adapter-owned");
+        expect(projectList).not.toHaveBeenCalled();
     });
 
     it.each(["resumeSession", "loadSession"] as const)("backfills an unassigned persisted thread on %s", async method => {
-        existingProject();
         const native = fixture.getCodexAppServerClient();
+        const create = mockProjectCreate();
         const response = resumed();
         const resume = vi.spyOn(native, "threadResume").mockResolvedValue(response as never);
         vi.spyOn(native, "threadReadWithHistory").mockImplementation(async () => ({thread: response.thread}) as never);
-        const assign = vi.spyOn(native, "threadProjectUpdate").mockImplementation(async ({projectId}) => {
+        const update = vi.spyOn(native, "threadProjectUpdate").mockImplementation(async ({projectId}) => {
             response.thread.projectId = projectId;
         });
         const cwd = path.join(root, "worktree");
         await fixture.getCodexAcpClient()[method]({sessionId: "thread-1", cwd, mcpServers: [], _meta: metadata()});
-        expect(response.thread.projectId).toBe("original-project");
-        expect(assign).toHaveBeenCalledWith({threadId: "thread-1", projectId: "original-project"});
+        expect(create).toHaveBeenCalledOnce();
+        expect(response.thread.projectId).toBe("adapter-project");
+        expect(update).toHaveBeenCalledWith({threadId: "thread-1", projectId: "adapter-project"});
         expect(resume).toHaveBeenCalledWith(expect.objectContaining({cwd}));
     });
 
-    it("preserves an existing user project assignment during resume", async () => {
+    it.each(["resumeSession", "loadSession"] as const)("preserves an existing native assignment on %s", async method => {
         const native = fixture.getCodexAppServerClient();
         const response = resumed("user-selected-project");
         vi.spyOn(native, "threadResume").mockResolvedValue(response as never);
-        vi.spyOn(native, "projectList").mockRejectedValue(new Error("must preserve existing assignment"));
-        vi.spyOn(native, "threadProjectUpdate").mockRejectedValue(new Error("must preserve existing assignment"));
-        const result = await fixture.getCodexAcpClient().resumeSession({sessionId: "thread-1", cwd: root, _meta: metadata()});
+        vi.spyOn(native, "threadReadWithHistory").mockImplementation(async () => ({thread: response.thread}) as never);
+        const create = vi.spyOn(native, "projectCreate").mockRejectedValue(new Error("must preserve existing assignment"));
+        const update = vi.spyOn(native, "threadProjectUpdate").mockRejectedValue(new Error("must preserve existing assignment"));
+        const result = await fixture.getCodexAcpClient()[method]({
+            sessionId: "thread-1", cwd: root, mcpServers: [], _meta: metadata(),
+        });
         expect(result.sessionId).toBe("thread-1");
         expect(response.thread.projectId).toBe("user-selected-project");
+        expect(create).not.toHaveBeenCalled();
+        expect(update).not.toHaveBeenCalled();
     });
 
-    it("assigns the fork target without changing the source thread", async () => {
-        existingProject();
+    it("preserves the native project inherited by a fork child", async () => {
         const native = fixture.getCodexAppServerClient();
-        const response = resumed("source-project");
+        const response = resumed("inherited-project");
         response.thread.id = "fork-child";
         vi.spyOn(native, "threadFork").mockResolvedValue(response as never);
-        const updates: unknown[] = [];
-        vi.spyOn(native, "threadProjectUpdate").mockImplementation(async params => {updates.push(params);});
+        const create = vi.spyOn(native, "projectCreate").mockRejectedValue(new Error("must preserve inherited assignment"));
+        const update = vi.spyOn(native, "threadProjectUpdate").mockRejectedValue(new Error("must preserve inherited assignment"));
         const result = await fixture.getCodexAcpClient().forkSession({
             sessionId: "source-thread", cwd: path.join(root, "worktree"), mcpServers: [], _meta: metadata(),
         });
         expect(result.sessionId).toBe("fork-child");
-        expect(updates).toEqual([{threadId: "fork-child", projectId: "original-project"}]);
+        expect(response.thread.projectId).toBe("inherited-project");
+        expect(create).not.toHaveBeenCalled();
+        expect(update).not.toHaveBeenCalled();
+    });
+
+    it("backfills the deterministic project when a fork child is unassigned", async () => {
+        const native = fixture.getCodexAppServerClient();
+        const response = resumed();
+        response.thread.id = "fork-child";
+        vi.spyOn(native, "threadFork").mockResolvedValue(response as never);
+        const create = mockProjectCreate();
+        const update = vi.spyOn(native, "threadProjectUpdate").mockImplementation(async ({projectId}) => {
+            response.thread.projectId = projectId;
+        });
+        const result = await fixture.getCodexAcpClient().forkSession({
+            sessionId: "source-thread", cwd: path.join(root, "worktree"), mcpServers: [], _meta: metadata(),
+        });
+        expect(result.sessionId).toBe("fork-child");
+        expect(create).toHaveBeenCalledOnce();
+        expect(update).toHaveBeenCalledWith({threadId: "fork-child", projectId: "adapter-project"});
+    });
+
+    it("preserves a deleted idempotency target error without root guessing", async () => {
+        const native = fixture.getCodexAppServerClient();
+        const projectList = vi.fn().mockResolvedValue({data: [{id: "user-project", roots: [{path: root}]}]});
+        Object.assign(native, {projectList});
+        const create = vi.spyOn(native, "projectCreate")
+            .mockRejectedValue(new Error("idempotency key refers to deleted project"));
+        await expect(new WorktreeProjects(native).resolve({version: 1, originProjectPath: root}))
+            .rejects.toThrow("idempotency key refers to deleted project");
+        expect(create).toHaveBeenCalledOnce();
+        expect(projectList).not.toHaveBeenCalled();
     });
 
     it("leaves clients without project metadata unchanged", async () => {
         const native = fixture.getCodexAppServerClient();
-        vi.spyOn(native, "projectList").mockRejectedValue(new Error("unexpected project lookup"));
+        const create = vi.spyOn(native, "projectCreate").mockRejectedValue(new Error("unexpected project creation"));
         const start = vi.spyOn(native, "threadStart").mockResolvedValue(resumed() as never);
         await fixture.getCodexAcpClient().newSession({cwd: root, mcpServers: []});
+        expect(create).not.toHaveBeenCalled();
         expect(start).toHaveBeenCalledWith({
             cwd: root, modelProvider: null,
             config: {
@@ -158,22 +202,6 @@ describe("local project identity across worktrees", () => {
                 projects: {[root]: {trust_level: "trusted"}},
             },
         });
-    });
-
-    it("rejects ambiguous roots instead of assigning an arbitrary project", async () => {
-        const native = fixture.getCodexAppServerClient();
-        vi.spyOn(native, "projectList").mockResolvedValue({data: [
-            {id: "one", name: "Example", roots: [{path: root}]},
-            {id: "two", name: "Projects", roots: [{path: root}]},
-        ], nextCursor: null});
-        await expect(new WorktreeProjects(native).resolve({version: 1, originProjectPath: root})).rejects.toThrow([
-            "Multiple Codex projects use the same root:",
-            root,
-            "Matching projects:",
-            "- Example (one)",
-            "- Projects (two)",
-            "Remove the duplicate root assignment in Codex, then try again.",
-        ].join("\n"));
     });
 
     it.each([null, {version: 2, originProjectPath: "/project"}, {version: 1, originProjectPath: "relative"}])("rejects invalid project metadata %j", value => {

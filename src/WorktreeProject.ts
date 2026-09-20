@@ -30,55 +30,21 @@ export class WorktreeProjects {
         if (!project) return undefined;
         const originProjectPath = await realpath(project.originProjectPath);
         const key = projectRootKey(originProjectPath);
-        return this.findOrCreate(originProjectPath, key);
-    }
-
-    async assign(thread: Thread, project: LodyWorktreeProject | undefined, preserveExisting: boolean): Promise<void> {
-        if (!project || (preserveExisting && thread.projectId)) return;
-        const projectId = await this.resolve(project);
-        if (projectId && projectId !== thread.projectId) {
-            await this.client.threadProjectUpdate({threadId: thread.id, projectId});
-        }
-    }
-
-    private async findOrCreate(originProjectPath: string, key: string): Promise<string> {
-        let cursor: string | undefined;
-        const matches = new Map<string, string>();
-        do {
-            const page = await this.client.projectList({limit: 100, ...(cursor ? {cursor} : {})});
-            for (const project of page.data) {
-                for (const root of project.roots) {
-                    if (projectRootKey(root.path) === key || await this.matchesRoot(root.path, key)) {
-                        matches.set(project.id, project.name);
-                        break;
-                    }
-                }
-            }
-            cursor = page.nextCursor ?? undefined;
-        } while (cursor);
-        if (matches.size > 1) {
-            const projects = Array.from(matches, ([id, name]) => `- ${name} (${id})`).join("\n");
-            throw RequestError.invalidParams(undefined,
-                `Multiple Codex projects use the same root:\n${originProjectPath}\nMatching projects:\n${projects}\nRemove the duplicate root assignment in Codex, then try again.`);
-        }
-        const match = matches.keys().next().value;
-        if (match) return match;
-        // Shared by independent adapter processes. Do not use a per-session/worktree id.
-        const idempotencyKey = `acp-project-v1:${createHash("sha256").update(key).digest("hex")}`;
+        // Codex persists this key as the native project identity. If its target was
+        // deleted, preserve Codex's tombstone error instead of guessing by root.
         const response = await this.client.projectCreate({
-            idempotencyKey,
+            idempotencyKey: `acp-project-v1:${createHash("sha256").update(key).digest("hex")}`,
             name: path.basename(originProjectPath) || originProjectPath,
             roots: [{path: originProjectPath}],
         });
         return response.project.id;
     }
 
-    private async matchesRoot(storedPath: string, key: string): Promise<boolean> {
-        try {
-            return projectRootKey(await realpath(storedPath)) === key;
-        } catch {
-            // An unrelated registered root can be deleted or inaccessible on this host.
-            return false;
+    async backfill(thread: Thread, project: LodyWorktreeProject | undefined): Promise<void> {
+        if (!project || thread.projectId) return;
+        const projectId = await this.resolve(project);
+        if (projectId) {
+            await this.client.threadProjectUpdate({threadId: thread.id, projectId});
         }
     }
 }

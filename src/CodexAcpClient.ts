@@ -542,7 +542,7 @@ export class CodexAcpClient {
             threadId: request.sessionId,
         });
         onSubscribed?.(request.sessionId);
-        await this.worktreeProjects.assign(response.thread, project, true);
+        await this.worktreeProjects.backfill(response.thread, project);
         const codexModels = await this.fetchAvailableModels();
         const currentModelId = this.createModelId(codexModels, response.model, response.reasoningEffort).toString();
         return {
@@ -560,7 +560,7 @@ export class CodexAcpClient {
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         return await runForkSession(request, additionalDirectories, {
             codexClient: this.codexClient,
-            assignProject: (thread, project) => this.worktreeProjects.assign(thread, project, false),
+            backfillProject: (thread, project) => this.worktreeProjects.backfill(thread, project),
             refreshSkills: (cwd, directories) => this.refreshSkills(cwd, directories),
             createSessionConfig: (cwd, directories, mcpServers) =>
                 this.createSessionConfig(cwd, directories, mcpServers),
@@ -585,7 +585,7 @@ export class CodexAcpClient {
             threadId: request.sessionId,
         });
         onSubscribed?.();
-        await this.worktreeProjects.assign(response.thread, project, true);
+        await this.worktreeProjects.backfill(response.thread, project);
         // Resume cursors bound durable history; later turns arrive through live events.
         // A null paginated cursor means there was no durable history at resume time.
         const thread = response.thread.historyMode === "paginated"
