@@ -284,7 +284,7 @@ describe("local project identity across worktrees", () => {
             throw deletedProjectError(params.idempotencyKey);
         });
         await expect(new WorktreeProjects(native).resolve({version: 1, originProjectPath: root}))
-            .rejects.toThrow("Codex project recovery exhausted generations 0 through 32");
+            .rejects.toThrow(`Codex project recovery for ${root} exhausted generations 0 through 32`);
         expect(create).toHaveBeenCalledTimes(33);
     });
 
