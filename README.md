@@ -168,3 +168,13 @@ Grouping keeps execution, permissions, and worktree cleanup with their existing
 owners. It does not enable Codex-managed worktree badges or Handoff. Standard
 `session/list.cwd` still filters execution directories. `ProjectApi.ts` contains
 the narrow experimental native API subset omitted by stable type generation.
+
+## Automatic session titles
+
+The adapter advertises Core `agentCapabilities._meta.lody.sessionTitle: { version: 1 }`.
+Its existing automatic generator names the native thread; native name updates are
+published through ACP `session_info_update` with `_meta.lody.titleSource: "explicit"`.
+Native name events do not distinguish generated names from manual renames. Prompt
+previews remain `fallback` and cleared names `unset`, so clients can skip duplicate
+generation without adopting a preview. Existing named/resumed sessions retain their
+current title behavior; generation remains best effort.

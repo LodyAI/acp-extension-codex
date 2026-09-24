@@ -31,6 +31,7 @@ describe('CodexACPAgent - initialize', () => {
             protocolVersion: acp.PROTOCOL_VERSION
         };
         const result = await agent.initialize(params);
+        expect(result.agentCapabilities?._meta?.["lody"]).toMatchObject({sessionTitle: {version: 1}});
         expect(result).toEqual({
             protocolVersion: acp.PROTOCOL_VERSION,
             agentInfo: {
