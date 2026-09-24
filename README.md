@@ -147,7 +147,7 @@ The adapter advertises Core `worktreeProject: { version: 1 }`. Clients can attac
 `_meta.lody.worktreeProject: { version: 1, originProjectPath: "/original/project" }` when
 creating, loading, resuming, or forking a session, while passing the actual
 worktree path as ACP `cwd`. This requires the project APIs in the pinned Codex
-0.154.0 runtime; older `CODEX_PATH` overrides may not support them.
+0.156.0 runtime; older `CODEX_PATH` overrides may not support them.
 
 The adapter derives a deterministic native project identity from the canonical
 Lody project root and relies on Codex `project/create` idempotency for persistence
@@ -168,3 +168,13 @@ Grouping keeps execution, permissions, and worktree cleanup with their existing
 owners. It does not enable Codex-managed worktree badges or Handoff. Standard
 `session/list.cwd` still filters execution directories. `ProjectApi.ts` contains
 the narrow experimental native API subset omitted by stable type generation.
+
+## Automatic session titles
+
+The adapter advertises Core `agentCapabilities._meta.lody.sessionTitle: { version: 1 }`.
+Its existing automatic generator names the native thread; native name updates are
+published through ACP `session_info_update` with `_meta.lody.titleSource: "explicit"`.
+Native name events do not distinguish generated names from manual renames. Prompt
+previews remain `fallback` and cleared names `unset`, so clients can skip duplicate
+generation without adopting a preview. Existing named/resumed sessions retain their
+current title behavior; generation remains best effort.

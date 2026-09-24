@@ -59,6 +59,7 @@ export const LODY_READ_SESSION_HISTORY_METHOD = LODY_EXTENSION_METHODS.sessionHi
 export const LODY_RATE_LIMITS_GET_METHOD = LODY_EXTENSION_METHODS.rateLimitsGet;
 
 export const CODEX_LODY_CAPABILITIES = {
+    sessionTitle: {version: 1},
     usage: {version: 1},
     rateLimits: {version: 1, query: true},
     forkAtTurn: {version: 1},
