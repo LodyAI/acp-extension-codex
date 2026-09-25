@@ -61,6 +61,8 @@ export class CodexTurnUsage {
             usage: {...turn.usage, ...(params.tokenUsage.modelContextWindow !== null
                 && {contextWindow: params.tokenUsage.modelContextWindow})},
             modelUsage: {[turn.model]: {...turn.usage}},
+            // This notification's own contribution, already inside modelUsage.
+            delta: {usage: {...delta}, modelUsage: {[turn.model]: {...delta}}},
             _meta: {lody: {usageScopeId: turn.id}, codex: {usageTurnId: turn.id}},
         };
     }

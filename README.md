@@ -67,6 +67,8 @@ remain disjoint. Each native turn reports its own cumulative totals, tagged with
 notification-local `_meta.lody.usageScopeId` (Core usage scope; the legacy duplicate
 `_meta.codex.usageTurnId` remains for older clients); Lody's matching CLI uses a stable
 per-turn persistence identity so repeated delivery cannot count a turn twice.
+Each update's `delta` is that notification's own increment, already included in
+the turn totals.
 
 Only the preceding native snapshot and current turn are held in memory. There is
 no sidecar, historical model ledger or session metadata baseline. Native resume

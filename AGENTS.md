@@ -37,7 +37,8 @@
   from the submitted turn parameters, not the UI model at notification time.
   Each native turn is a separate accounting lifetime: notification-local
   `_meta.lody.usageScopeId` (Core scope; legacy duplicate `_meta.codex.usageTurnId`)
-  lets Lody persist cumulative turn snapshots under a stable turn key. Never sum repeated snapshots or include restored history.
+  lets Lody persist cumulative turn snapshots under a stable turn key; `delta` carries
+  each notification's own increment. Never sum repeated snapshots or include restored history.
   Keep only the native snapshot and current turn in memory; no sidecar, session
   metadata baseline, historical model ledger, raw-response accounting or child totals.
   If a resume snapshot is missing, anchor the first notification without billing it.
