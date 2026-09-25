@@ -49,7 +49,8 @@ describe('Token Usage Events', () => {
             inputTokens: 2000, outputTokens: 0, cacheReadInputTokens: 0,
             cacheCreationInputTokens: 0, reasoningOutputTokens: 0,
         }});
-        expect([a?._meta.codex.usageTurnId, b?._meta.codex.usageTurnId]).toEqual(['a', 'b']);
+        expect([a?._meta.lody.usageScopeId, b?._meta.lody.usageScopeId]).toEqual(['a', 'b']);
+        expect(b?._meta.codex.usageTurnId).toBe('b');
         expect(a?.usage.inputTokens).toBe(10000);
     });
 

@@ -64,7 +64,8 @@ forking, and context-window usage stay on their standard protocol paths.
 Usage reporting assigns differences between native root-thread token snapshots
 to the model selected for the submitted turn. Cache/input/output/reasoning buckets
 remain disjoint. Each native turn reports its own cumulative totals, tagged with
-notification-local `_meta.codex.usageTurnId`; Lody's matching CLI uses a stable
+notification-local `_meta.lody.usageScopeId` (Core usage scope; the legacy duplicate
+`_meta.codex.usageTurnId` remains for older clients); Lody's matching CLI uses a stable
 per-turn persistence identity so repeated delivery cannot count a turn twice.
 
 Only the preceding native snapshot and current turn are held in memory. There is
