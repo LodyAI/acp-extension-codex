@@ -49,8 +49,17 @@ describe('Token Usage Events', () => {
             inputTokens: 2000, outputTokens: 0, cacheReadInputTokens: 0,
             cacheCreationInputTokens: 0, reasoningOutputTokens: 0,
         }});
-        expect([a?._meta.codex.usageTurnId, b?._meta.codex.usageTurnId]).toEqual(['a', 'b']);
+        expect([a?._meta.lody.usageScopeId, b?._meta.lody.usageScopeId]).toEqual(['a', 'b']);
+        expect(b?._meta.codex.usageTurnId).toBe('b');
         expect(a?.usage.inputTokens).toBe(10000);
+        // Each emission carries only its own increment as delta.
+        const b2 = tracker.update(snapshot('b', 12500, 500));
+        expect(b2?.modelUsage?.['model-b']?.inputTokens).toBe(2500);
+        const increment = {
+            inputTokens: 500, outputTokens: 0, cacheReadInputTokens: 0,
+            cacheCreationInputTokens: 0, reasoningOutputTokens: 0,
+        };
+        expect(b2?.delta).toEqual({usage: increment, modelUsage: {'model-b': increment}});
     });
 
     it.each([false, true])('excludes resume/fork history with native replay=%s', replay => {

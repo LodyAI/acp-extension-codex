@@ -18,7 +18,8 @@ function normalize(total: TokenUsageBreakdown): ModelUsage {
 
 export type CodexTurnUsageUpdate = SessionUsageUpdate & {
     // Notification-local accounting scope, not persisted session metadata.
-    _meta: {codex: {usageTurnId: string}};
+    // `codex.usageTurnId` is the legacy spelling kept for older Lody clients.
+    _meta: {lody: {usageScopeId: string}; codex: {usageTurnId: string}};
 };
 
 /** One native turn is one accounting lifetime. No disk state or historical model ledger. */
@@ -60,7 +61,9 @@ export class CodexTurnUsage {
             usage: {...turn.usage, ...(params.tokenUsage.modelContextWindow !== null
                 && {contextWindow: params.tokenUsage.modelContextWindow})},
             modelUsage: {[turn.model]: {...turn.usage}},
-            _meta: {codex: {usageTurnId: turn.id}},
+            // This notification's own contribution, already inside modelUsage.
+            delta: {usage: {...delta}, modelUsage: {[turn.model]: {...delta}}},
+            _meta: {lody: {usageScopeId: turn.id}, codex: {usageTurnId: turn.id}},
         };
     }
 }
