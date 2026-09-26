@@ -278,6 +278,7 @@ export class CodexEventHandler {
         onAccountUpdated?: (notification: AccountUpdatedNotification) => void,
         collectTurnDiffs = false,
     ) {
+        connection = subagents.connectionForEvents(connection);
         this.connection = connection;
         this.onAccountUpdated = onAccountUpdated;
         this.sessionState = sessionState;

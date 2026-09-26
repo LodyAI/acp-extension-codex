@@ -1,6 +1,29 @@
 This package uses the bundled `@openai/codex` dependency by default.
 Set `CODEX_PATH` to run a different Codex binary; versions other than the one specified in `package.json` may not be compatible.
 
+### Lody subagent event transport
+
+Clients advertising `_meta.lody.subagentEvents: {version: 1}` receive Core
+`_lody/subagents/event` notifications. Child execution IDs are scoped to the root
+ACP session and generated afresh for reactivated terminal children. Child text,
+thinking, tool and plan output stays in that run's stream. Legacy task metadata
+is suppressed for normalized runs. Clients without this capability retain the
+existing native-subagent or ordinary tool-call representation.
+
+A snapshot precedes child output, including when output arrives before the
+activity name. Later activity notifications refresh the name without replacing
+the run. Monitoring timeouts and prompt cleanup report incomplete, unknown
+observation; only native child completion proves success/failure/cancellation.
+There is no durable run recovery or output replay. This adapter currently advertises
+no run cancellation, output query, or numerical progress support.
+
+Known child permission and elicitation requests use the root ACP session with
+`_meta.lody.subagentRunId` and `subagentToolCallId`. Consent tool IDs are namespaced
+by run, while canonical child output retains native tool IDs. Only consent tools
+are mirrored into root updates for the existing permission UI. Unknown child
+interactions are rejected; no permission or root cancellation is inferred from
+child output.
+
 | Workflow | Native lifecycle | Completion boundary |
 | --- | --- | --- |
 | Manual `/compact` | `thread/compact/start`, then `turn/started` | Matching `turn/completed`, including failure or interruption |
