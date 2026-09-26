@@ -4,6 +4,128 @@ import type { SessionState } from "../../CodexAcpServer";
 import { AgentMode } from "../../AgentMode";
 import {ACPSessionConnection} from "../../ACPSessionConnection";
 import {CodexSubagentEventRouter} from "../../subagents/CodexSubagentEventRouter";
+import {CodexEventHandler} from "../../CodexEventHandler";
+import type {AcpClientConnection} from "../../ACPSessionConnection";
+import {isLodySubagentEvent, type LodySubagentEvent} from "acp-extension-core";
+
+describe("normalized Lody subagent events", () => {
+    function fixture() {
+        const sent: Array<{method: string; params: any}> = [];
+        const connection: AcpClientConnection = {
+            notify: async (method: string, params: unknown) => { sent.push({method, params}); },
+            request: (async (method: string, params: unknown) => {
+                sent.push({method, params});
+                return {outcome: {outcome: "selected", optionId: "allow_once"}};
+            }) as AcpClientConnection["request"],
+        };
+        const router = new CodexSubagentEventRouter("root", true, new ACPSessionConnection(connection, "root"), true);
+        const state = createTestSessionState({sessionId: "root", currentModelId: "model", agentMode: AgentMode.DEFAULT_AGENT_MODE});
+        state.subagents = router;
+        const handler = new CodexEventHandler(connection, state, true, false, "test-epoch", router);
+        const events = () => sent.map(x => x.params).filter(isLodySubagentEvent);
+        return {sent, connection, router, handler, events};
+    }
+    function spawn(id = "child", senderThreadId = "root", tool = "spawnAgent"): ServerNotification {
+        return {method: "item/started", params: {threadId: senderThreadId, turnId: "parent-turn", startedAtMs: 0,
+            item: {type: "collabAgentToolCall", id: `spawn-${id}`, tool, status: "inProgress", senderThreadId,
+                receiverThreadIds: [id], prompt: "Synthetic delegated task", model: null, reasoningEffort: null,
+                agentsStates: {[id]: {status: "running", message: null}}}}} as ServerNotification;
+    }
+    function delta(threadId = "child", text = "Investigating"): ServerNotification {
+        return {method: "item/agentMessage/delta", params: {threadId, turnId: "child-turn", itemId: "message", delta: text}};
+    }
+    function finish(threadId = "child"): ServerNotification {
+        return {method: "turn/completed", params: {threadId, turn: {id: "child-turn", status: "completed", items: [], error: null,
+            itemsView: "full", startedAt: null, completedAt: null, durationMs: null}}};
+    }
+    it("publishes snapshot before immediate child content, nests runs, finishes, and excludes late content", async () => {
+        const f = fixture();
+        await f.handler.handleNotification(spawn());
+        await f.handler.handleNotification(delta());
+        await f.handler.handleNotification(spawn("grandchild", "child"));
+        await f.handler.handleNotification(delta("grandchild", "Nested"));
+        await f.handler.handleNotification(finish("grandchild"));
+        await f.handler.handleNotification(finish());
+        await f.handler.handleNotification(delta("child", "Late"));
+        const events = f.events();
+        expect(events.map(x => x.type)).toEqual(["snapshot", "output", "snapshot", "output", "snapshot", "snapshot"]);
+        expect(events[0]).toMatchObject({sessionId: "root", snapshot: {state: "running", parentRunId: null, parentToolCallId: "spawn-child"}});
+        expect(events[1]).toMatchObject({nativeTurnId: "child-turn", messageId: "message", update: {content: {text: "Investigating"}}});
+        expect(events[2]).toMatchObject({snapshot: {parentRunId: events[0]!.runId}});
+        expect(events[5]).toMatchObject({runId: events[0]!.runId, snapshot: {state: "completed"}});
+        expect(f.sent.filter(x => x.method === "session/update")).toEqual([]);
+    });
+    it("root-routes known child consent and mirrors only its permission tool under a namespaced ID", async () => {
+        const f = fixture();
+        await f.handler.handleNotification(spawn());
+        const run = f.events()[0]!;
+        const wrapped = f.router.connectionForEvents(f.connection);
+        const response = await wrapped.request("session/request_permission", {sessionId: "child", toolCall: {toolCallId: "tool", title: "Run"}, options: []});
+        expect(response).toEqual({outcome: {outcome: "selected", optionId: "allow_once"}});
+        expect(f.sent[1]!.params).toMatchObject({sessionId: "root", _meta: {lody: {subagentRunId: run.runId, subagentToolCallId: "tool"}}});
+        const mapped = f.sent[1]!.params.toolCall.toolCallId;
+        expect(mapped).not.toBe("tool");
+        await wrapped.notify("session/update", {sessionId: "child", update: {sessionUpdate: "tool_call_update", toolCallId: "tool", status: "completed"}});
+        expect(f.events()[1]).toMatchObject({type: "output", update: {toolCallId: "tool", status: "completed"}});
+        expect(f.sent.at(-1)).toMatchObject({method: "session/update", params: {sessionId: "root", update: {toolCallId: mapped, status: "completed", _meta: {lody: {subagentRunId: run.runId}}}}});
+        await expect(wrapped.request("session/request_permission", {sessionId: "unknown", toolCall: {toolCallId: "x"}, options: []})).rejects.toThrow("Unknown");
+        await wrapped.request("elicitation/create", {sessionId: "child", toolCallId: "ask", mode: "form", message: "Choose", requestedSchema: {type: "object", properties: {}}});
+        expect(f.sent.at(-1)).toMatchObject({method: "elicitation/create", params: {
+            sessionId: "root", toolCallId: `subagent:${encodeURIComponent(run.runId)}:ask`,
+            _meta: {lody: {subagentRunId: run.runId, subagentToolCallId: "ask"}},
+        }});
+    });
+    it("marks observation timeout unknown and gives a completed child's reactivation a new identity", async () => {
+        const f = fixture();
+        await f.handler.handleNotification(spawn());
+        const first = f.events()[0]!.runId;
+        await f.handler.handleNotification(finish());
+        await f.handler.handleNotification(spawn("child", "root", "resumeAgent"));
+        const snapshots = f.events().filter((e): e is LodySubagentEvent & {type: "snapshot"} => e.type === "snapshot");
+        expect(snapshots[2]!.runId).not.toBe(first);
+        await f.router.wait(new AbortController().signal, 0);
+        expect(f.events().at(-1)).toMatchObject({type: "snapshot", snapshot: {state: "unknown", outputIncomplete: true}});
+    });
+    it("refreshes native names in place and marks a failed spawn without child status as failed", async () => {
+        const f = fixture();
+        await f.handler.handleNotification(spawn());
+        const runId = f.events()[0]!.runId;
+        await f.handler.handleNotification({method: "item/started", params: {threadId: "root", turnId: "parent-turn", startedAtMs: 0,
+            item: {type: "subAgentActivity", id: "activity", kind: "started", agentThreadId: "child", agentPath: "/root/Research"}}});
+        expect(f.events().at(-1)).toMatchObject({runId, snapshot: {name: "Research", state: "running"}});
+        const failed = spawn();
+        if (failed.method !== "item/started" || failed.params.item.type !== "collabAgentToolCall") throw new Error("Invalid fixture");
+        failed.params.item.status = "failed";
+        failed.params.item.agentsStates = {};
+        await f.handler.handleNotification(failed);
+        expect(f.events().at(-1)).toMatchObject({runId, snapshot: {name: "Research", state: "failed"}});
+    });
+    it("never emits legacy collaboration rows, including receiverless spawn start, wait and reactivation", async () => {
+        const f = fixture();
+        const pending = spawn();
+        if (pending.method !== 'item/started' || pending.params.item.type !== 'collabAgentToolCall') throw new Error('Invalid fixture');
+        pending.params.item.receiverThreadIds = [];
+        pending.params.item.agentsStates = {};
+        await f.handler.handleNotification(pending);
+        await f.handler.handleNotification(spawn());
+        await f.handler.handleNotification(spawn('child', 'root', 'wait'));
+        await f.handler.handleNotification(finish());
+        await f.handler.handleNotification(spawn('child', 'root', 'resumeAgent'));
+        await f.handler.handleNotification(spawn('child', 'root', 'sendInput'));
+        expect(f.sent.filter(x => x.method === 'session/update')).toEqual([]);
+        expect(f.events().filter(e => e.type === 'snapshot').map(e => e.snapshot.state)).toEqual(['running', 'completed', 'running']);
+    });
+    it("does not invent a running phase when first discovering a completed execution", async () => {
+        const f = fixture();
+        const completed = spawn();
+        if (completed.method !== 'item/started' || completed.params.item.type !== 'collabAgentToolCall') throw new Error('Invalid fixture');
+        completed.params.item.status = 'completed';
+        completed.params.item.agentsStates = {child: {status: 'completed', message: null}};
+        await f.handler.handleNotification(completed);
+        expect(f.events()).toHaveLength(1);
+        expect(f.events()[0]).toMatchObject({type: 'snapshot', snapshot: {state: 'completed'}});
+    });
+});
 import {
     createCodexMockTestFixture,
     createTestSessionState,

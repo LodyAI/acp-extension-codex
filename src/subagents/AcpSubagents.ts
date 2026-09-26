@@ -2,6 +2,7 @@ import type {
     ClientCapabilities,
     SessionCapabilities,
 } from "@agentclientprotocol/sdk";
+import {supportsLodySubagentEvents} from "acp-extension-core";
 import {
     AIR_NATIVE_SUBAGENT_SESSIONS_KEY,
     clientSupportsAirCapability,
@@ -39,6 +40,7 @@ export type SubagentAwareSessionCapabilities = SessionCapabilities & {
 export function clientSupportsSubagents(
     capabilities?: ClientCapabilities | null,
 ): boolean {
+    if (supportsLodySubagentEvents(capabilities)) return true;
     const subagents = (
         capabilities as (ClientCapabilities & { subagents?: unknown }) | null | undefined
     )?.subagents;

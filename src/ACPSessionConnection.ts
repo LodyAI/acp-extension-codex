@@ -21,6 +21,8 @@ export class ACPSessionConnection {
             update: update
         }));
     }
+
+    get clientConnection(): AcpClientConnection { return this.connection; }
 }
 
 export type UpdateSessionEvent = AcpSessionUpdate;
