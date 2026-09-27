@@ -581,9 +581,11 @@ export class CodexAcpServer {
             // Never delete that entry based on an error from this process alone.
             if (this.managedChatgptProfile) {
                 if (e.message.includes("Your access token could not be refreshed")) {
-                    throw RequestError.internalError(
-                        "This Codex account could not refresh. Its saved credentials were kept. Restart the session to retry; if authentication still fails, add a new provider."
-                    );
+                    const message = "This Codex account could not refresh. Its saved credentials were kept. Restart the session to retry; if authentication still fails, add a new provider.";
+                    if (e.message.includes("refresh token was already used")) {
+                        throw RequestError.internalError({kind: "codex_refresh_contention", message}, message);
+                    }
+                    throw RequestError.internalError(message);
                 }
                 return;
             }
