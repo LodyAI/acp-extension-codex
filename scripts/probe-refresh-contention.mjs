@@ -54,6 +54,7 @@ const endpoint = `http://127.0.0.1:${address.port}/oauth/token`;
 const env = { ...process.env, CODEX_HOME: root, CODEX_REFRESH_TOKEN_URL_OVERRIDE: endpoint, CODEX_APP_SERVER_LOGIN_CLIENT_ID: 'synthetic-client', OPENAI_API_KEY: '', CODEX_API_KEY: '' };
 const a = startCodexConnection(undefined, env);
 const b = startCodexConnection(undefined, env);
+let recovered;
 const timeout = setTimeout(() => { release(); a.process.kill(); b.process.kill(); }, 20000);
 try {
   const init = { clientInfo: { name: 'synthetic-refresh-probe', version: '1' }, capabilities: null };
@@ -67,10 +68,16 @@ try {
   const after = await Promise.all([a.connection.sendRequest('getAuthStatus', { includeToken: true, refreshToken: false }), b.connection.sendRequest('getAuthStatus', { includeToken: true, refreshToken: false })]);
   assert.deepEqual(after.map(status => Boolean(status.authToken)).sort(), [false, true]);
   console.log('after', after.map(status => ({authMethod: status.authMethod, hasToken: Boolean(status.authToken)})));
+  recovered = startCodexConnection(undefined, env);
+  await recovered.connection.sendRequest('initialize', init);
+  const restartedStatus = await recovered.connection.sendRequest('getAuthStatus', { includeToken: true, refreshToken: false });
+  assert.ok(restartedStatus.authToken);
+  console.log('fresh process loaded the winner\'s saved token');
 } finally {
   clearTimeout(timeout);
   a.process.kill();
   b.process.kill();
+  recovered?.process.kill();
   server.close();
   await rm(root, { recursive: true, force: true });
 }
