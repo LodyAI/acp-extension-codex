@@ -61,6 +61,12 @@ rate-limit query, acknowledged steering, goals, subagent/background-task lifecyc
 compaction lifecycle, and history reads. ACP-standard plans, elicitation, session
 forking, and context-window usage stay on their standard protocol paths.
 
+For a managed ChatGPT profile, new, resume, fork, and stable load keep saved
+credentials on native refresh failure. A reused refresh token yields ACP error
+data with `kind: "codex_refresh_contention"` so Lody can retry session startup
+once in a fresh process. Other refresh failures carry no retry marker. Legacy
+`session/load` keeps its original error behavior and does not auto-logout.
+
 Usage reporting assigns differences between native root-thread token snapshots
 to the model selected for the submitted turn. Cache/input/output/reasoning buckets
 remain disjoint. Each native turn reports its own cumulative totals, tagged with

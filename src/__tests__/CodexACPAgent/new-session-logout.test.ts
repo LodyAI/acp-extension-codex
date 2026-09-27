@@ -3,6 +3,40 @@ import {createCodexMockTestFixture, createTestModel} from "../acp-test-utils";
 import {ModelId} from "../../ModelId";
 
 describe("New session logout handling", () => {
+    it.each([
+        {name: "token refresh", error: "Your access token could not be refreshed because your refresh token was already used. Please log out and sign in again.", expected: "Its saved credentials were kept"},
+        {name: "cloud requirements", error: "Failed to load cloud requirements (workspace-managed policies).", expected: "cloud requirements"},
+    ])("preserves a managed ChatGPT profile on $name failure", async ({name, error, expected}) => {
+        const fixture = createCodexMockTestFixture(undefined, undefined, true);
+        const codexAcpAgent = fixture.getCodexAcpAgent();
+        const codexAcpClient = fixture.getCodexAcpClient();
+        const codexAppServerClient = fixture.getCodexAppServerClient();
+        vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
+        const logoutSpy = vi.spyOn(codexAcpClient, "logout").mockResolvedValue();
+        vi.spyOn(codexAppServerClient, "threadStart").mockRejectedValue(new Error(error));
+
+        const failure = await codexAcpAgent.newSession({cwd: "", mcpServers: []})
+            .then(() => undefined, reason => reason);
+        expect(typeof failure?.data === "string" ? failure.data : JSON.stringify(failure?.data ?? failure.message)).toContain(expected);
+        if (name === "token refresh") {
+            expect(failure?.data).toMatchObject({kind: "codex_refresh_contention"});
+        }
+        expect(logoutSpy).not.toHaveBeenCalled();
+    });
+
+    it("does not mark other refresh failures as contention", async () => {
+        const fixture = createCodexMockTestFixture(undefined, undefined, true);
+        const codexAcpAgent = fixture.getCodexAcpAgent();
+        vi.spyOn(fixture.getCodexAcpClient(), "authRequired").mockResolvedValue(false);
+        vi.spyOn(fixture.getCodexAppServerClient(), "threadStart").mockRejectedValue(
+            new Error("Your access token could not be refreshed because the account was revoked. Please log out and sign in again.")
+        );
+
+        const failure = await codexAcpAgent.newSession({cwd: "", mcpServers: []})
+            .then(() => undefined, reason => reason);
+        expect(failure?.data).toEqual(expect.any(String));
+    });
+
     it("logs out when newSession fails with an error containing log out", async () => {
         const fixture = createCodexMockTestFixture();
         const codexAcpAgent = fixture.getCodexAcpAgent();

@@ -88,6 +88,7 @@ function startAcpServer() {
             undefined,
             undefined,
             codexProcessState,
+            Boolean(process.env["LODY_CODEX_PROFILE_CONFIG"]) && config?.forced_login_method === "chatgpt",
         );
     }
 

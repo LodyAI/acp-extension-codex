@@ -90,6 +90,7 @@ export interface ConnectionConfig {
     getExitCode: () => number | null;
     acpConnection?: AcpConnectionConfig;
     codexProcessState?: CodexProcessState;
+    managedChatgptProfile?: boolean;
 }
 
 export function createBaseTestFixture(config: ConnectionConfig): TestFixture {
@@ -110,6 +111,7 @@ export function createBaseTestFixture(config: ConnectionConfig): TestFixture {
         config.getExitCode,
         undefined,
         config.codexProcessState,
+        config.managedChatgptProfile,
     );
 
     const transportEvents: CodexConnectionEvent[] = [];
@@ -273,6 +275,7 @@ export interface CodexMockTestFixture extends TestFixture {
 export function createCodexMockTestFixture(
     restartCodexClient?: () => Promise<CodexAcpClient>,
     process?: CodexConnection["process"],
+    managedChatgptProfile = false,
 ): CodexMockTestFixture {
     let unhandledNotificationHandler: ((notification: any) => void) | null = null;
     const requestHandlers = new Map<string, (params: unknown) => Promise<unknown>>();
@@ -323,6 +326,7 @@ export function createCodexMockTestFixture(
     const baseFixture = createBaseTestFixture({
         connection: mockCodexConnection,
         getExitCode: () => null,
+        managedChatgptProfile,
         ...(process ? {codexProcessState: {
             connection: {connection: mockCodexConnection, process},
             codexPath: undefined,
