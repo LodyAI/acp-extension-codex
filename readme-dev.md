@@ -3,6 +3,8 @@ Set `CODEX_PATH` to run a different Codex binary; versions other than the one sp
 
 ### Lody subagent event transport
 
+The event contract is supplied by the published Core 0.1.9 dependency.
+
 Clients advertising `_meta.lody.subagentEvents: {version: 1}` receive Core
 `_lody/subagents/event` notifications. Child execution IDs are scoped to the root
 ACP session and generated afresh for reactivated terminal children. Child text,
