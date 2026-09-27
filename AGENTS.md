@@ -16,6 +16,9 @@
 
 - Keep edits consistent with existing formatting.
 - When adding env/config knobs, document them in `readme-dev.md`.
+- Managed-profile process tokens identify independent native uses, not exclusive leases.
+  Write only the matching host-owned record's proof and remove the token from native env.
+  Never restrict same-profile concurrency or implement credential refresh in the adapter.
 - Lody may launch the adapter from an Electron or daemon process with no Windows console.
   Set `windowsHide: true` on every adapter-owned console-subsystem child process spawn;
   `ELECTRON_RUN_AS_NODE` is a separate runtime-mode concern.
