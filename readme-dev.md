@@ -26,6 +26,14 @@ cannot release its prompt. See the [cancellation boundary decision](.agents/note
 - `NO_BROWSER` - hide browser-based ChatGPT auth when set.
 - `APP_SERVER_LOGS` - directory for adapter logs.
 
+For a managed ChatGPT profile, a native session-open error never triggers the
+adapter's legacy automatic logout: another process may already have refreshed
+the shared keyring entry. The failing session reports the native error without
+deleting credentials. This does not coordinate native refreshes across processes.
+`node --import tsx scripts/probe-refresh-contention.mjs` demonstrates the
+remaining race with two pinned native processes, synthetic file-backed tokens,
+and an isolated local refresh endpoint; it uses no real account or keyring.
+
 ### Quick start
 
 #### Develop on Windows?

@@ -3,6 +3,24 @@ import {createCodexMockTestFixture, createTestModel} from "../acp-test-utils";
 import {ModelId} from "../../ModelId";
 
 describe("New session logout handling", () => {
+    it.each([
+        {name: "token refresh", error: "Your access token could not be refreshed because your refresh token was already used. Please log out and sign in again.", expected: "Its saved credentials were kept"},
+        {name: "cloud requirements", error: "Failed to load cloud requirements (workspace-managed policies).", expected: "cloud requirements"},
+    ])("preserves a managed ChatGPT profile on $name failure", async ({error, expected}) => {
+        const fixture = createCodexMockTestFixture(undefined, undefined, true);
+        const codexAcpAgent = fixture.getCodexAcpAgent();
+        const codexAcpClient = fixture.getCodexAcpClient();
+        const codexAppServerClient = fixture.getCodexAppServerClient();
+        vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
+        const logoutSpy = vi.spyOn(codexAcpClient, "logout").mockResolvedValue();
+        vi.spyOn(codexAppServerClient, "threadStart").mockRejectedValue(new Error(error));
+
+        const failure = await codexAcpAgent.newSession({cwd: "", mcpServers: []})
+            .then(() => undefined, reason => reason);
+        expect(String(failure?.data ?? failure)).toContain(expected);
+        expect(logoutSpy).not.toHaveBeenCalled();
+    });
+
     it("logs out when newSession fails with an error containing log out", async () => {
         const fixture = createCodexMockTestFixture();
         const codexAcpAgent = fixture.getCodexAcpAgent();

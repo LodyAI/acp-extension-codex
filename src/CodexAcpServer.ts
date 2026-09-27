@@ -301,6 +301,7 @@ export class CodexAcpServer {
     private readonly defaultAuthRequest: CodexAuthRequest | null;
     private readonly getExitCode: () => number | null;
     private readonly getRecentStderr: () => string;
+    private readonly managedChatgptProfile: boolean;
     private readonly sessionFailureEpoch: string;
     private availableCommands: CodexCommands;
     private clientInfo: acp.Implementation | null;
@@ -333,6 +334,7 @@ export class CodexAcpServer {
         getExitCode?: () => number | null,
         getRecentStderr?: () => string,
         codexProcessState?: CodexProcessState,
+        managedChatgptProfile = false,
     ) {
         this.sessions = new Map();
         this.pendingMcpStartupSessions = new Map();
@@ -352,6 +354,7 @@ export class CodexAcpServer {
         this.captureStderr();
         this.getExitCode = getExitCode ?? (() => this.codexProcessState?.connection.process.exitCode ?? null);
         this.getRecentStderr = getRecentStderr ?? (() => this.codexProcessState?.stderr ?? "");
+        this.managedChatgptProfile = managedChatgptProfile;
         this.sessionFailureEpoch = randomUUID();
         this.clientInfo = null;
         this.clientCapabilities = null;
@@ -574,6 +577,16 @@ export class CodexAcpServer {
 
     async handleError(e: Error){
         if (e.message.includes("log out") || e.message.includes("cloud requirements")) {
+            // Another native process may already have refreshed this profile's shared keyring entry.
+            // Never delete that entry based on an error from this process alone.
+            if (this.managedChatgptProfile) {
+                if (e.message.includes("Your access token could not be refreshed")) {
+                    throw RequestError.internalError(
+                        "This Codex account could not refresh. Its saved credentials were kept. Restart the session to retry; if authentication still fails, add a new provider."
+                    );
+                }
+                return;
+            }
             await this.runWithProcessCheck(() => this.codexAcpClient.logout());
             await this.refreshAuthState(null);
             throw RequestError.internalError(`${(e.message)}\n\nYou have been logged out. Please try again.`);
