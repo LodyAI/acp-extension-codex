@@ -9,6 +9,8 @@ import {
 } from "../CodexToolCallMapper";
 import type {SubagentState} from "./AcpSubagents";
 import {isRootAgentPath, nameFromAgentPath, normalizeAgentPath} from "./CodexAgentPath";
+import {LodySubagentEvents} from "./LodySubagentEvents";
+import type {AcpClientConnection} from "../ACPSessionConnection";
 
 type NativeSubagent = {
     parentThreadId: string;
@@ -22,6 +24,8 @@ type NativeSubagent = {
 };
 
 type PendingSubagent = {
+    parentToolCallId?: string;
+    initialState?: SubagentState;
     parentThreadId: string;
     parentSessionId: string;
     task: string;
@@ -36,6 +40,7 @@ export type ClosingChildSession = {
 
 /** Owns native lifecycle, child routing, waiting, and legacy activity deduplication. */
 export class CodexSubagentEventRouter {
+    private readonly lodyEvents?: LodySubagentEvents;
     private static readonly DEFAULT_WAIT_TIMEOUT_MS = 10 * 60 * 1000;
     private static readonly MAX_PENDING_NOTIFICATIONS = 256;
 
@@ -51,7 +56,17 @@ export class CodexSubagentEventRouter {
         private readonly rootSessionId: string,
         private readonly supported: boolean,
         private readonly session: ACPSessionConnection,
-    ) {}
+        normalized = false,
+    ) {
+        if (normalized) {
+            this.lodyEvents = new LodySubagentEvents(rootSessionId, session.clientConnection);
+            this.session = new ACPSessionConnection(this.lodyEvents.wrap(session.clientConnection), rootSessionId);
+        }
+    }
+
+    connectionForEvents(connection: AcpClientConnection): AcpClientConnection {
+        return this.lodyEvents?.wrap(connection) ?? connection;
+    }
 
     async handle(notification: ServerNotification): Promise<boolean> {
         if (notification.method === "turn/started") {
@@ -103,6 +118,12 @@ export class CodexSubagentEventRouter {
             if (isRootAgentPath(item.agentPath)) return true;
             if (this.terminalPendingSpawns.has(item.agentThreadId)) return true;
             let hasNativeRepresentation = this.children.has(item.agentThreadId);
+            const existing = this.children.get(item.agentThreadId);
+            if (existing && this.lodyEvents) {
+                existing.name = nameFromAgentPath(item.agentPath, existing.name);
+                existing.path = normalizeAgentPath(item.agentPath);
+                await this.lodyEvents.metadata(existing.sessionId, {name: existing.name});
+            }
             if (!hasNativeRepresentation) {
                 await this.materialize(item.agentThreadId, item.agentPath);
                 hasNativeRepresentation = this.children.has(item.agentThreadId);
@@ -125,8 +146,8 @@ export class CodexSubagentEventRouter {
         let representedSpawn = false;
         if (item.tool === "spawnAgent") {
             const parent = this.children.get(item.senderThreadId);
-            const parentThreadId = parent ? item.senderThreadId : this.rootSessionId;
-            const parentSessionId = parent?.sessionId ?? this.rootSessionId;
+            const parentThreadId = parent || this.lodyEvents ? item.senderThreadId : this.rootSessionId;
+            const parentSessionId = parent?.sessionId ?? (this.lodyEvents ? item.senderThreadId : this.rootSessionId);
             for (const childSessionId of item.receiverThreadIds) {
                 if (childSessionId.trim().length === 0) {
                     logger.log("Ignoring spawned subagent with an empty thread id");
@@ -142,19 +163,32 @@ export class CodexSubagentEventRouter {
                     representedSpawn = true;
                     continue;
                 }
+                const nativeStatus = item.agentsStates[childSessionId]?.status;
+                const initialState = !this.lodyEvents ? undefined : item.status === "failed" ? "failed"
+                    : nativeStatus === "notFound" || nativeStatus === "shutdown" ? "disconnected"
+                    : nativeStatus ? terminalStateOf(nativeStatus) : undefined;
                 this.pendingSpawns.set(childSessionId, {
+                    parentToolCallId: item.id,
+                    ...(initialState ? {initialState} : {}),
                     parentThreadId,
                     parentSessionId,
                     task: item.prompt?.trim() || "Delegated task",
                     buffered: [],
                     droppedBufferedNotifications: 0,
                 });
+                if (this.lodyEvents) {
+                    await this.materialize(childSessionId, "");
+                    if (item.model) await this.lodyEvents.metadata(childSessionId, {modelId: item.model});
+                }
                 representedSpawn = true;
             }
         }
 
         for (const [childSessionId, state] of Object.entries(item.agentsStates)) {
-            const terminalState = state && terminalStateOf(state.status);
+            const child = this.children.get(childSessionId);
+            if (child && state?.message && this.lodyEvents) await this.lodyEvents.metadata(child.sessionId, {summary: state.message});
+            const terminalState = state && this.lodyEvents && (state.status === "notFound" || state.status === "shutdown")
+                ? "disconnected" : state && terminalStateOf(state.status);
             if (!terminalState) continue;
             if (this.children.has(childSessionId)) await this.finish(childSessionId, terminalState);
             else if (this.pendingSpawns.has(childSessionId)) this.finishPending(childSessionId);
@@ -162,11 +196,15 @@ export class CodexSubagentEventRouter {
         if (item.tool === "spawnAgent" && item.status === "failed") {
             for (const childSessionId of item.receiverThreadIds) {
                 if (this.pendingSpawns.has(childSessionId)) this.finishPending(childSessionId);
+                else if (this.lodyEvents) await this.finish(childSessionId, "failed");
             }
         }
         // `updated` is intentionally not synthesized: the portable protocol
         // currently defines only spawn and terminal lifecycle.
-        return item.tool === "spawnAgent" && representedSpawn;
+        // Normalized lifecycle owns the whole collaboration family. In particular,
+        // spawn start can have no receiver yet, and emitting its legacy tool would
+        // leave a dangling parent row once completion discovers the child.
+        return this.lodyEvents !== undefined || item.tool === "spawnAgent" && representedSpawn;
     }
 
     shouldIgnore(notification: ServerNotification): boolean {
@@ -252,7 +290,7 @@ export class CodexSubagentEventRouter {
             const remainingMs = deadline - Date.now();
             if (remainingMs <= 0) {
                 logger.log(`Timed out waiting for subagents in session ${this.rootSessionId}; marking them failed`);
-                await this.finishOutstanding("failed");
+                await this.finishOutstanding(this.lodyEvents ? "disconnected" : "failed", "timeout");
                 return;
             }
             const changed = await new Promise<boolean>((resolve) => {
@@ -276,18 +314,20 @@ export class CodexSubagentEventRouter {
             });
             if (!changed) {
                 logger.log(`Timed out waiting for subagents in session ${this.rootSessionId}; marking them failed`);
-                await this.finishOutstanding("failed");
+                await this.finishOutstanding(this.lodyEvents ? "disconnected" : "failed", "timeout");
                 return;
             }
         }
     }
 
-    async finishOutstanding(state: SubagentState): Promise<void> {
+    async finishOutstanding(state: SubagentState, reason?: "timeout"): Promise<void> {
+        // Losing the parent's observation is not proof that its child stopped.
+        if (this.lodyEvents) state = "disconnected";
         for (const childSessionId of [...this.pendingSpawns.keys()]) {
             this.finishPending(childSessionId);
         }
         for (const childSessionId of [...this.children.keys()].reverse()) {
-            await this.finish(childSessionId, state);
+            await this.finish(childSessionId, state, reason);
         }
     }
 
@@ -308,7 +348,7 @@ export class CodexSubagentEventRouter {
     private async materialize(childSessionId: string, path: string): Promise<void> {
         if (this.children.has(childSessionId)) return;
         const pending = this.pendingSpawns.get(childSessionId);
-        const name = nameFromAgentPath(path, fallbackName(childSessionId));
+        const name = path.trim() ? nameFromAgentPath(path, fallbackName(childSessionId)) : fallbackName(childSessionId);
         const inferredParent = this.parentForPath(path);
         const parentThreadId = pending?.parentThreadId ?? inferredParent.threadId;
         const parentSessionId = pending?.parentSessionId ?? inferredParent.sessionId;
@@ -319,6 +359,11 @@ export class CodexSubagentEventRouter {
             name,
             task,
             capabilities: {},
+            ...(pending && this.lodyEvents ? {_meta: {lody: {
+                parentToolCallId: pending.parentToolCallId,
+                ...(pending.initialState ? {initialState: pending.initialState} : {}),
+                ...(pending.droppedBufferedNotifications ? {outputIncomplete: true} : {}),
+            }}} : {}),
         }, parentSessionId);
         this.children.set(childSessionId, {
             parentThreadId,
@@ -326,8 +371,9 @@ export class CodexSubagentEventRouter {
             sessionId: childSessionId,
             name,
             task,
-            path: normalizeAgentPath(path),
+            ...(path.trim() ? {path: normalizeAgentPath(path)} : {}),
             generation: 1,
+            ...(pending?.initialState ? {terminalState: pending.initialState} : {}),
         });
         this.pendingSpawns.delete(childSessionId);
         this.replayQueue.push(...(pending?.buffered ?? []));
@@ -343,7 +389,7 @@ export class CodexSubagentEventRouter {
         this.notifyWaiters();
     }
 
-    private async finish(childSessionId: string, state: SubagentState): Promise<void> {
+    private async finish(childSessionId: string, state: SubagentState, reason?: "timeout"): Promise<void> {
         const child = this.children.get(childSessionId);
         if (!child || child.terminalState !== undefined) return;
         child.terminalState = state;
@@ -352,6 +398,7 @@ export class CodexSubagentEventRouter {
                 sessionUpdate: "subagent_state_update",
                 subagentSessionId: child.sessionId,
                 state,
+                ...(this.lodyEvents && reason ? {_meta: {lody: {reasonCode: reason}}} : {}),
             }, child.parentSessionId);
         }
         catch (error) {
@@ -432,10 +479,13 @@ export class CodexSubagentEventRouter {
         const separator = normalized.lastIndexOf("/");
         if (separator <= 0) return {threadId: this.rootSessionId, sessionId: this.rootSessionId};
         const parentPath = normalized.slice(0, separator);
+        if (isRootAgentPath(parentPath)) return {threadId: this.rootSessionId, sessionId: this.rootSessionId};
         const parent = [...this.children.entries()].find(([, child]) => child.path === parentPath);
         return parent
             ? {threadId: parent[0], sessionId: parent[1].sessionId}
-            : {threadId: this.rootSessionId, sessionId: this.rootSessionId};
+            : this.lodyEvents
+                ? {threadId: `unresolved:${parentPath}`, sessionId: `unresolved:${parentPath}`}
+                : {threadId: this.rootSessionId, sessionId: this.rootSessionId};
     }
 }
 

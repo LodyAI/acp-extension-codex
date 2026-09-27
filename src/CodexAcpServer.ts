@@ -1,4 +1,5 @@
 import * as acp from "@agentclientprotocol/sdk";
+import {supportsLodySubagentEvents} from "acp-extension-core";
 import {RequestError, type SessionId, type SessionModeState} from "@agentclientprotocol/sdk";
 import {CodexEventHandler, type CompletedPlan} from "./CodexEventHandler";
 import {CodexApprovalHandler} from "./permissions/CodexApprovalHandler";
@@ -783,6 +784,7 @@ export class CodexAcpServer {
                 sessionId,
                 clientSupportsSubagents(this.clientCapabilities),
                 new ACPSessionConnection(this.connection, sessionId),
+                supportsLodySubagentEvents(this.clientCapabilities),
             ),
             asyncTasks: this.createAsyncTasks(sessionId),
         };
@@ -2220,6 +2222,7 @@ export class CodexAcpServer {
                 sessionId,
                 clientSupportsSubagents(this.clientCapabilities),
                 new ACPSessionConnection(this.connection, sessionId),
+                supportsLodySubagentEvents(this.clientCapabilities),
             ),
             asyncTasks: this.createAsyncTasks(sessionId),
         };
@@ -3167,12 +3170,12 @@ export class CodexAcpServer {
             const permissionLifecycle = this.permissionLifecycleContext(sessionState);
             const permissionContext = permissionLifecycle.beginPrompt();
             const approvalHandler = new CodexApprovalHandler(
-                this.connection,
+                sessionState.subagents.connectionForEvents(this.connection),
                 permissionContext,
                 activePrompt.signal,
             );
             const elicitationHandler = new CodexElicitationHandler(
-                this.connection,
+                sessionState.subagents.connectionForEvents(this.connection),
                 permissionContext,
                 this.clientCapabilities,
                 activePrompt.signal,
