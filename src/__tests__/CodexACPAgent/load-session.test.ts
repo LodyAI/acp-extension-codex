@@ -7,6 +7,50 @@ import { createCodexMockTestFixture, createTestModel } from "../acp-test-utils";
 import type { Model, Thread, ThreadGoal } from "../../app-server/v2";
 
 describe("CodexACPAgent - loadSession", () => {
+    it.each([
+        {
+            name: "reused refresh token",
+            message: "Your access token could not be refreshed because your refresh token was already used. Please log out and sign in again.",
+            contention: true,
+        },
+        {
+            name: "other refresh failure",
+            message: "Your access token could not be refreshed because the account was revoked. Please log out and sign in again.",
+            contention: false,
+        },
+    ])("preserves managed credentials on loadSession $name", async ({message, contention}) => {
+        const fixture = createCodexMockTestFixture(undefined, undefined, true);
+        const agent = fixture.getCodexAcpAgent();
+        const client = fixture.getCodexAcpClient();
+        vi.spyOn(client, "authRequired").mockResolvedValue(false);
+        const logout = vi.spyOn(client, "logout").mockResolvedValue();
+        vi.spyOn(fixture.getCodexAppServerClient(), "threadResume").mockRejectedValue(new Error(message));
+
+        const failure = await agent.loadSession({sessionId: "existing", cwd: "/workspace", mcpServers: []})
+            .then(() => undefined, reason => reason);
+
+        if (contention) {
+            expect(failure?.data).toMatchObject({kind: "codex_refresh_contention"});
+        } else {
+            expect(failure?.data).toEqual(expect.any(String));
+        }
+        expect(logout).not.toHaveBeenCalled();
+    });
+
+    it("leaves legacy loadSession refresh errors and credentials unchanged", async () => {
+        const fixture = createCodexMockTestFixture();
+        const agent = fixture.getCodexAcpAgent();
+        const client = fixture.getCodexAcpClient();
+        vi.spyOn(client, "authRequired").mockResolvedValue(false);
+        const logout = vi.spyOn(client, "logout").mockResolvedValue();
+        const nativeError = new Error("Your access token could not be refreshed because your refresh token was already used. Please log out and sign in again.");
+        vi.spyOn(fixture.getCodexAppServerClient(), "threadResume").mockRejectedValue(nativeError);
+
+        await expect(agent.loadSession({sessionId: "existing", cwd: "/workspace", mcpServers: []}))
+            .rejects.toBe(nativeError);
+        expect(logout).not.toHaveBeenCalled();
+    });
+
     it("replays native child history and disconnects an orphan", async () => {
         const fixture = createCodexMockTestFixture();
         const agent = fixture.getCodexAcpAgent();

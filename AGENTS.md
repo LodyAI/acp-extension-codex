@@ -19,6 +19,8 @@
 - Managed-profile process tokens identify independent native uses, not exclusive leases.
   Write only the matching host-owned record's proof and remove the token from native env.
   Never restrict same-profile concurrency or implement credential refresh in the adapter.
+- Classify managed ChatGPT refresh failures on new, resume, fork, and stable load without
+  logging out; mark only reused-token contention. Legacy load retains its original error path.
 - Lody may launch the adapter from an Electron or daemon process with no Windows console.
   Set `windowsHide: true` on every adapter-owned console-subsystem child process spawn;
   `ELECTRON_RUN_AS_NODE` is a separate runtime-mode concern.

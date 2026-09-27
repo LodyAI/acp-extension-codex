@@ -575,20 +575,24 @@ export class CodexAcpServer {
         }
     }
 
+    private handleManagedChatgptRefreshError(error: unknown): void {
+        if (!this.managedChatgptProfile || !(error instanceof Error)
+            || !error.message.includes("Your access token could not be refreshed")) {
+            return;
+        }
+        // Another native process may already have refreshed this profile's shared keyring entry.
+        // An error from this process cannot authorize deleting that entry.
+        const message = "This Codex account could not refresh. Its saved credentials were kept. Restart the session to retry; if authentication still fails, add a new provider.";
+        if (error.message.includes("refresh token was already used")) {
+            throw RequestError.internalError({kind: "codex_refresh_contention", message}, message);
+        }
+        throw RequestError.internalError(message);
+    }
+
     async handleError(e: Error){
+        this.handleManagedChatgptRefreshError(e);
         if (e.message.includes("log out") || e.message.includes("cloud requirements")) {
-            // Another native process may already have refreshed this profile's shared keyring entry.
-            // Never delete that entry based on an error from this process alone.
-            if (this.managedChatgptProfile) {
-                if (e.message.includes("Your access token could not be refreshed")) {
-                    const message = "This Codex account could not refresh. Its saved credentials were kept. Restart the session to retry; if authentication still fails, add a new provider.";
-                    if (e.message.includes("refresh token was already used")) {
-                        throw RequestError.internalError({kind: "codex_refresh_contention", message}, message);
-                    }
-                    throw RequestError.internalError(message);
-                }
-                return;
-            }
+            if (this.managedChatgptProfile) return;
             await this.runWithProcessCheck(() => this.codexAcpClient.logout());
             await this.refreshAuthState(null);
             throw RequestError.internalError(`${(e.message)}\n\nYou have been logged out. Please try again.`);
@@ -916,13 +920,17 @@ export class CodexAcpServer {
             await this.providerUpdate;
         }
         logger.log("Loading session...", {sessionId: params.sessionId});
+        const openedSession = await this.getOrCreateSessionWithHistory(params).catch((error: unknown) => {
+            this.handleManagedChatgptRefreshError(error);
+            throw error;
+        });
         const {
             sessionId,
             modelState,
             modeState,
             thread,
             availableCommands,
-        } = await this.getOrCreateSessionWithHistory(params);
+        } = openedSession;
 
         await this.streamThreadHistory(sessionId, thread);
         this.publishAvailableCommandsAsync(sessionId, availableCommands);
