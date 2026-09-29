@@ -2327,7 +2327,8 @@ export class CodexAcpServer {
         ancestry: Set<string>,
         threadCache: Map<string, Thread | null>,
     ): Promise<void> {
-        const session = new ACPSessionConnection(this.connection, sessionId);
+        const session = new ACPSessionConnection(
+            sessionState.subagents.connectionForEvents(this.connection), sessionId);
         const announced = new Map<string, {generation: number; sessionId: string; terminal: boolean}>();
         for (const turn of thread.turns) {
             for (const item of turn.items) {
