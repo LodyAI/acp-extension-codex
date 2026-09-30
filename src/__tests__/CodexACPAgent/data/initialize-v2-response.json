@@ -35,6 +35,9 @@
         "sessionArchive": {
           "version": 1,
           "mode": "native"
+        },
+        "mcpApps": {
+          "version": 1
         }
       }
     }

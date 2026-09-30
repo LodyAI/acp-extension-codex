@@ -1,3 +1,4 @@
+import type {LodyMcpAppToolCallMeta} from "acp-extension-core";
 import type {ThreadItem} from "../../app-server/v2";
 import type {ToolFacts} from "../ToolFacts";
 import {toTerminalToolStatus, toToolStatus} from "./ToolStatus";
@@ -10,7 +11,8 @@ type McpToolCallItem = ThreadItem & {type: "mcpToolCall"};
  * AIR shows the text of `rawOutput.result` and `rawOutput.error.message`.
  */
 export class McpToolReporter {
-    static started(item: McpToolCallItem): ToolFacts {
+    /** `mcpApp` is the app descriptor for a client that hosts MCP Apps, sent only on the start. */
+    static started(item: McpToolCallItem, mcpApp: LodyMcpAppToolCallMeta | null = null): ToolFacts {
         return {
             toolCallId: item.id,
             report: "start",
@@ -20,6 +22,7 @@ export class McpToolReporter {
             input: mcpInput(item),
             ...resultFacts(item),
             mcp: true,
+            ...(mcpApp === null ? {} : {mcpApp}),
         };
     }
 

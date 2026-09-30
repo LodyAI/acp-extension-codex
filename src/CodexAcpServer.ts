@@ -2,7 +2,15 @@ import {publishLodySessionMetadata} from "./AcpExtensions";
 import {clientSupportsNotices} from "./SessionNotice";
 import {GOAL_EXTENSION_VERSION, GOAL_CONTROL_ACTIONS} from "./GoalExtension";
 import * as acp from "@agentclientprotocol/sdk/unstable";
-import {supportsLodySubagentEvents} from "acp-extension-core";
+import {
+    supportsLodySubagentEvents,
+    type LodyMcpAppLoadRequest,
+    type LodyMcpAppLoadResponse,
+    type LodyMcpAppResourceReadRequest,
+    type LodyMcpAppResourceReadResponse,
+    type LodyMcpAppToolCallRequest,
+    type LodyMcpAppToolCallResponse,
+} from "acp-extension-core";
 import {RequestError, type SessionId, type SessionModeState} from "@agentclientprotocol/sdk/unstable";
 import {CodexEventHandler, type CompletedPlan, sanitizeProviderErrorText, failureWasReported} from "./CodexEventHandler";
 import {attachmentFileUri, desktopAttachmentHistory} from "./DesktopAttachmentHistory";
@@ -242,6 +250,7 @@ import {ASYNC_TASK_STOP_METHOD} from "./async-tasks/AsyncTaskExtension";
 import {CodexBackgroundTerminalTasks} from "./async-tasks/CodexBackgroundTerminalTasks";
 import {clientSupportsCompaction, CodexSessionCompactions, createCompactionUpdate} from "./CodexSessionCompactions";
 import {CodexSessionToolCalls} from "./CodexSessionToolCalls";
+import {clientSupportsMcpApps, McpAppCalls, readMcpAppMeta} from "./McpApps";
 import {
     type AgentFileChangeReport,
     type AgentFileChangeReportRequest,
@@ -322,6 +331,8 @@ export interface SessionState extends SessionIndexTitleState {
      * whatever is still open here for a turn the dead app-server process never finished.
      */
     openToolCalls: CodexSessionToolCalls;
+    /** Present only when the client negotiated `_meta.lody.mcpApps`. */
+    mcpApps?: McpAppCalls;
 }
 
 type HistoryProjectionState = Pick<
@@ -905,7 +916,7 @@ export class CodexAcpServer {
         const clientCapabilities = toV1ClientCapabilitiesView(params.capabilities);
         const appServer = this.ensureAppServer();
         if (appServer) await appServer;
-        await this.runWithProcessCheck(() => this.codexAcpClient.initialize({clientInfo: params.info}));
+        await this.runWithProcessCheck(() => this.codexAcpClient.initialize({clientInfo: params.info, clientCapabilities}));
         this.clientInfo = params.info;
         this.clientCapabilities = clientCapabilities;
         this.initializeRequest = {clientInfo: params.info};
@@ -924,7 +935,13 @@ export class CodexAcpServer {
                 version: packageJson.version,
             },
             capabilities: {
-                _meta: {lody: {promptSuggestions: CODEX_LODY_CAPABILITIES.promptSuggestions, sessionArchive: CODEX_LODY_CAPABILITIES.sessionArchive}},
+                _meta: {
+                    lody: {
+                        promptSuggestions: CODEX_LODY_CAPABILITIES.promptSuggestions,
+                        sessionArchive: CODEX_LODY_CAPABILITIES.sessionArchive,
+                        mcpApps: CODEX_LODY_CAPABILITIES.mcpApps,
+                    },
+                },
                 auth: {
                     _meta: {
                         // Presence means "this agent pushes `_auth/status_update`".
@@ -1086,6 +1103,41 @@ export class CodexAcpServer {
                 return {};
             }
         }
+    }
+
+    async mcpAppLoad(params: LodyMcpAppLoadRequest): Promise<LodyMcpAppLoadResponse> {
+        return await this.withMcpApps(params.sessionId, (calls, appServer) =>
+            calls.load(appServer, params.sessionId, params.toolCallId));
+    }
+
+    async mcpAppResourceRead(params: LodyMcpAppResourceReadRequest): Promise<LodyMcpAppResourceReadResponse> {
+        return await this.withMcpApps(params.sessionId, (calls, appServer) =>
+            calls.readResource(appServer, params.sessionId, params.toolCallId, params.uri));
+    }
+
+    async mcpAppToolCall(
+        params: Omit<LodyMcpAppToolCallRequest, "arguments"> & {arguments?: Record<string, unknown> | undefined},
+    ): Promise<LodyMcpAppToolCallResponse> {
+        return await this.withMcpApps(params.sessionId, (calls, appServer) =>
+            calls.callTool(appServer, params.sessionId, params.toolCallId, params.name, params.arguments));
+    }
+
+    private async withMcpApps<T>(
+        sessionId: string,
+        operation: (calls: McpAppCalls, appServer: CodexAppServerClient) => Promise<T>,
+    ): Promise<T> {
+        if (this.providerUpdate !== null) await this.waitForProviderUpdate();
+        const sessionState = this.sessions.get(sessionId);
+        if (!sessionState) {
+            throw RequestError.invalidParams(undefined, `Unknown session: ${sessionId}`);
+        }
+        const calls = sessionState.mcpApps;
+        if (!calls) {
+            throw RequestError.invalidRequest(undefined, "MCP Apps were not negotiated for this client");
+        }
+        const appServer = this.ensureAppServer();
+        if (appServer) await appServer;
+        return await this.runWithProcessCheck(() => operation(calls, this.codexAcpClient.appServerClient));
     }
 
     /**
@@ -1756,6 +1808,7 @@ export class CodexAcpServer {
         const previous = this.sessions.get(sessionState.sessionId);
         previous?.asyncTasks.clear();
         void previous?.promptSuggestions?.clear();
+        if (clientSupportsMcpApps(this.clientCapabilities)) sessionState.mcpApps ??= new McpAppCalls();
         this.sessions.set(sessionState.sessionId, sessionState);
         this.clientDelivery.openSession(sessionState.sessionId);
         const v2 = AcpV2Connection.of(this.connection);
@@ -4285,7 +4338,10 @@ export class CodexAcpServer {
             case "commandExecution":
                 return CommandReporter.history(item).map(facts => renderer.render(facts));
             case "mcpToolCall":
-                return [renderer.render(McpToolReporter.started(item))];
+                return [renderer.render(McpToolReporter.started(
+                    item,
+                    clientSupportsMcpApps(this.clientCapabilities) ? readMcpAppMeta(item) : null,
+                ))];
             case "dynamicToolCall":
                 return [renderer.render(DynamicToolReporter.started(item))];
             case "collabAgentToolCall":
