@@ -17,6 +17,7 @@ Use [OpenAI Codex](https://github.com/openai/codex) from [Agent Client Protocol]
 - [Background terminal tasks](docs/async-tasks.md) in AIR, with task status and targeted stop support after capability negotiation.
 - Without native subagent negotiation, subagent launches remain standard ACP tool calls with provider-neutral lifecycle data in `_meta.lody.task`; Codex thread details remain available in `_meta.codex`.
 - Session-scoped long-running goals through the provider-neutral [goal extension](docs/goal-extension.md).
+- [MCP Apps](docs/mcp-apps-extension.md) (after capability negotiation): tool calls that declare a `ui://` app carry a small descriptor, and the client loads the app, its resources, and app-visible tool calls through the adapter.
 - A per-turn [agent file-change report](docs/agent-file-change-report.md) after capability negotiation.
 - Client-provided MCP servers over command-based stdio config and HTTP transport.
 - Native ACP session forking through Codex App Server `thread/fork`.
@@ -58,7 +59,7 @@ The initialize response advertises versioned capabilities under
 `agentCapabilities._meta.lody`. Methods and payloads come from
 `acp-extension-core`; this includes usage and rate-limit reporting, an independent
 rate-limit query, acknowledged steering, goals, subagent/background-task lifecycle,
-compaction lifecycle, and history reads. ACP-standard plans, elicitation, session
+compaction lifecycle, history reads, and MCP Apps hosting. ACP-standard plans, elicitation, session
 forking, and context-window usage stay on their standard protocol paths.
 
 For a managed ChatGPT profile, new, resume, fork, and stable load keep saved

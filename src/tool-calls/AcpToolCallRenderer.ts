@@ -47,6 +47,9 @@ export class AcpToolCallRenderer {
         if (facts.lodyToolName !== undefined) {
             meta["lody"] = {...(meta["lody"] as Record<string, unknown> | undefined), toolName: facts.lodyToolName};
         }
+        if (facts.mcpApp !== undefined) {
+            meta["lody"] = {...(meta["lody"] as Record<string, unknown> | undefined), mcpApp: facts.mcpApp};
+        }
         // A `tool_call` requires a title.
         if (facts.report === "start" && rendered["title"] === undefined) rendered["title"] = "";
         const fields = {

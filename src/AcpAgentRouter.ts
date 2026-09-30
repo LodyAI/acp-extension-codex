@@ -10,6 +10,11 @@ import {
     SESSION_STEERING_METHOD, LODY_RATE_LIMITS_GET_METHOD, LODY_READ_SESSION_HISTORY_METHOD,
 } from "./AcpExtensions";
 import {ASYNC_TASK_STOP_METHOD} from "./async-tasks/AsyncTaskExtension";
+import {
+    MCP_APP_LOAD_METHOD,
+    MCP_APP_RESOURCE_READ_METHOD,
+    MCP_APP_TOOL_CALL_METHOD,
+} from "./McpApps";
 
 const emptyExtensionParamsParser = z.preprocess(
     (params) => params ?? {},
@@ -43,6 +48,20 @@ const asyncTaskStopParamsParser = z.object({
     sessionId: z.string().trim().min(1),
     asyncTaskId: z.string().trim().min(1),
 }).passthrough();
+
+const mcpAppLoadParamsParser = z.object({
+    sessionId: z.string().min(1),
+    toolCallId: z.string().min(1),
+}).passthrough();
+
+const mcpAppResourceReadParamsParser = mcpAppLoadParamsParser.extend({
+    uri: z.string().min(1),
+});
+
+const mcpAppToolCallParamsParser = mcpAppLoadParamsParser.extend({
+    name: z.string().min(1),
+    arguments: z.record(z.string(), z.unknown()).optional(),
+});
 
 // v2 request methods whose params are all-optional, per the v2 schema: `session/list` and
 // `auth/logout` have no required fields. SDK 1.5.0's built-in v2 parsers for these are plain
@@ -135,7 +154,10 @@ export function createAcpAgentRouter(
         .onRequest(LODY_READ_SESSION_HISTORY_METHOD, z.object({sessionId: z.string().min(1)}).passthrough(), (ctx) => getAgent().readSessionHistory(ctx.params))
         .onRequest(SESSION_STEERING_METHOD, sessionSteerParamsParser, (ctx) => getAgent().extMethod(SESSION_STEERING_METHOD, ctx.params))
         .onRequest(ASYNC_TASK_STOP_METHOD, asyncTaskStopParamsParser, (ctx) => getAgent().extMethod(ASYNC_TASK_STOP_METHOD, ctx.params))
-        .onRequest(GOAL_CONTROL_METHOD, goalControlParamsParser, (ctx) => getAgent().extMethod(GOAL_CONTROL_METHOD, ctx.params));
+        .onRequest(GOAL_CONTROL_METHOD, goalControlParamsParser, (ctx) => getAgent().extMethod(GOAL_CONTROL_METHOD, ctx.params))
+        .onRequest(MCP_APP_LOAD_METHOD, mcpAppLoadParamsParser, (ctx) => getAgent().mcpAppLoad(ctx.params))
+        .onRequest(MCP_APP_RESOURCE_READ_METHOD, mcpAppResourceReadParamsParser, (ctx) => getAgent().mcpAppResourceRead(ctx.params))
+        .onRequest(MCP_APP_TOOL_CALL_METHOD, mcpAppToolCallParamsParser, (ctx) => getAgent().mcpAppToolCall(ctx.params));
 
     const v2Agent = acpV2.agent({name: packageJson.name})
         .onConnect((connection) => attachAgent(createAgent(new AcpV2Connection(connection.client)), connection.signal))
@@ -161,7 +183,10 @@ export function createAcpAgentRouter(
         .onRequest(LODY_READ_SESSION_HISTORY_METHOD, z.object({sessionId: z.string().min(1)}).passthrough(), (ctx) => getAgent().readSessionHistory(ctx.params))
         .onRequest(SESSION_STEERING_METHOD, sessionSteerParamsParser, (ctx) => getAgent().extMethod(SESSION_STEERING_METHOD, ctx.params))
         .onRequest(GOAL_CONTROL_METHOD, goalControlParamsParser, (ctx) => getAgent().extMethod(GOAL_CONTROL_METHOD, ctx.params))
-        .onRequest(ASYNC_TASK_STOP_METHOD, asyncTaskStopParamsParser, (ctx) => getAgent().extMethod(ASYNC_TASK_STOP_METHOD, ctx.params));
+        .onRequest(ASYNC_TASK_STOP_METHOD, asyncTaskStopParamsParser, (ctx) => getAgent().extMethod(ASYNC_TASK_STOP_METHOD, ctx.params))
+        .onRequest(MCP_APP_LOAD_METHOD, mcpAppLoadParamsParser, (ctx) => getAgent().mcpAppLoad(ctx.params))
+        .onRequest(MCP_APP_RESOURCE_READ_METHOD, mcpAppResourceReadParamsParser, (ctx) => getAgent().mcpAppResourceRead(ctx.params))
+        .onRequest(MCP_APP_TOOL_CALL_METHOD, mcpAppToolCallParamsParser, (ctx) => getAgent().mcpAppToolCall(ctx.params));
 
     return acpV2.agentProtocolRouter().withV1(v1Agent).withV2(withOmittedParamsWorkaround(v2Agent));
 }
