@@ -334,6 +334,63 @@ describe("MCP Apps", () => {
         }]);
     });
 
+    describe("connector-namespaced codex_apps tools", () => {
+        // Codex lists and calls codex_apps tools by the connector-prefixed name, while
+        // the app's own HTML knows only its MCP server's bare tool names.
+        const namespacedApp = appItem({status: "completed", result: appResult, tool: "graphapp.explore_graph"});
+        const connectorTools: Handler = () => ({
+            data: [{
+                name: "codex_apps",
+                tools: {
+                    "graphapp.explore_graph": {name: "graphapp.explore_graph", inputSchema: {type: "object"}},
+                    "graphapp.refresh_graph": {
+                        name: "graphapp.refresh_graph", inputSchema: {type: "object"}, _meta: {ui: {resourceUri}},
+                    },
+                    "graphapp.model_only": {
+                        name: "graphapp.model_only", inputSchema: {type: "object"}, _meta: {ui: {visibility: ["model"]}},
+                    },
+                    "otherapp.delete_all": {name: "otherapp.delete_all", inputSchema: {type: "object"}},
+                },
+            }],
+            nextCursor: null,
+        });
+        const setup = async () => {
+            const fixture = createAppServerFixture({
+                "thread/read": () => ({thread: threadWith([namespacedApp])}),
+                "mcpServerStatus/list": connectorTools,
+                "mcpServer/tool/call": () => ({content: [{type: "text", text: "ok"}]}),
+            });
+            await openSession(fixture.agent);
+            return fixture;
+        };
+
+        it.each(["refresh_graph", "graphapp.refresh_graph"])(
+            "forwards %s under the originating connector's namespaced name",
+            async (name) => {
+                const {agent, requests} = await setup();
+
+                await expect(agent.mcpAppToolCall({sessionId, toolCallId: "call-app-1", name, arguments: {depth: 1}}))
+                    .resolves.toEqual({content: [{type: "text", text: "ok"}]});
+                expect(requests("mcpServer/tool/call")).toEqual([{
+                    threadId: sessionId, server: "codex_apps", tool: "graphapp.refresh_graph", arguments: {depth: 1},
+                }]);
+            },
+        );
+
+        it.each([
+            {name: "delete_all", reason: "exists only under another connector"},
+            {name: "otherapp.delete_all", reason: "names another connector's tool"},
+            {name: "model_only", reason: "resolves to a model-only tool"},
+            {name: "missing", reason: "exists under no connector"},
+        ])("refuses a name that $reason", async ({name}) => {
+            const {agent, requests} = await setup();
+
+            await expect(agent.mcpAppToolCall({sessionId, toolCallId: "call-app-1", name}))
+                .rejects.toMatchObject({code: -32602});
+            expect(requests("mcpServer/tool/call")).toEqual([]);
+        });
+    });
+
     it.each(["v1", "v2"] as const)("routes the three Lody MCP App methods over ACP %s with validated params", async (version) => {
         const received: unknown[] = [];
         const record = async (params: unknown) => {

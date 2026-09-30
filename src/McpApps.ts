@@ -14,6 +14,8 @@ import type {Tool} from "./app-server/Tool";
 import type {JsonValue} from "./app-server/serde_json/JsonValue";
 import type {McpToolCallResult, McpToolCallStatus, ThreadItem} from "./app-server/v2";
 
+const CODEX_APPS_SERVER = "codex_apps";
+
 export const MCP_APP_LOAD_METHOD = LODY_EXTENSION_METHODS.mcpAppsLoad;
 export const MCP_APP_RESOURCE_READ_METHOD = LODY_EXTENSION_METHODS.mcpAppsResourceRead;
 export const MCP_APP_TOOL_CALL_METHOD = LODY_EXTENSION_METHODS.mcpAppsToolCall;
@@ -117,7 +119,7 @@ export class McpAppCalls {
     ): Promise<LodyMcpAppToolCallResponse> {
         const call = await this.require(appServer, sessionId, toolCallId);
         const server = call.app.server;
-        const tool = await this.findTool(appServer, call.threadId, server, name);
+        const tool = await this.findTool(appServer, call.threadId, server, appToolNames(server, call.app.tool, name));
         const visibility = field(field(tool?._meta, "ui"), "visibility");
         if (tool === undefined || (Array.isArray(visibility) && !visibility.includes("app"))) {
             throw RequestError.invalidParams(undefined, `Tool ${name} on ${server} is not callable from its MCP App`);
@@ -125,7 +127,7 @@ export class McpAppCalls {
         return await forwardErrors(() => appServer.mcpServerToolCall({
             threadId: call.threadId,
             server,
-            tool: name,
+            tool: tool.name,
             ...(args !== undefined ? {arguments: args as JsonValue} : {}),
         })) as LodyMcpAppToolCallResponse;
     }
@@ -145,13 +147,23 @@ export class McpAppCalls {
         return call;
     }
 
-    /** A cache miss re-lists the server once, so tools added after the first lookup are found. */
-    private async findTool(appServer: AppServer, threadId: string, server: string, name: string): Promise<Tool | undefined> {
-        const cached = this.tools.get(server)?.find(tool => tool.name === name);
+    /**
+     * Returns the server's tool matching the first of `names` it lists. A cache miss
+     * re-lists the server once, so tools added after the first lookup are found.
+     */
+    private async findTool(
+        appServer: AppServer,
+        threadId: string,
+        server: string,
+        names: string[],
+    ): Promise<Tool | undefined> {
+        const match = (tools: Tool[] | undefined) =>
+            names.map(name => tools?.find(tool => tool.name === name)).find(tool => tool !== undefined);
+        const cached = match(this.tools.get(server));
         if (cached) return cached;
         const tools = await this.listServerTools(appServer, threadId, server);
         this.tools.set(server, tools);
-        return tools.find(tool => tool.name === name);
+        return match(tools);
     }
 
     private async listServerTools(appServer: AppServer, threadId: string, server: string): Promise<Tool[]> {
@@ -168,6 +180,18 @@ export class McpAppCalls {
         } while (cursor !== null);
         return [];
     }
+}
+
+/**
+ * `codex_apps` aggregates many connectors on one server, and Codex lists and calls
+ * their tools as `<connector>.<tool>`, while the app's HTML calls the bare name its
+ * own MCP server uses. An app may reach only its own connector's tools there.
+ */
+function appToolNames(server: string, originatingTool: string, name: string): string[] {
+    const separator = originatingTool.lastIndexOf(".");
+    if (server !== CODEX_APPS_SERVER || separator <= 0) return [name];
+    const namespace = originatingTool.slice(0, separator + 1);
+    return [name.startsWith(namespace) ? name : `${namespace}${name}`];
 }
 
 function toCallToolResult(result: McpToolCallResult | null, status: McpToolCallStatus): LodyMcpCallToolResult | null {
