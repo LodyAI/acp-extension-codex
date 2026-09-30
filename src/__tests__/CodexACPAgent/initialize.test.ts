@@ -69,14 +69,7 @@ describe('CodexACPAgent - initialize', () => {
                 },
             },
             authMethods: getCodexAuthMethods(),
-            _meta: {
-                jetbrains: {
-                    air: {
-                        version: 1,
-                        capabilities: ["sessionFailure", "agentFileChangeReport", "nativeSubagentSessions", "asyncTasks", "recommendedValue"],
-                    },
-                },
-            },
+            _meta: {steering: {supported: true}},
         });
     });
 

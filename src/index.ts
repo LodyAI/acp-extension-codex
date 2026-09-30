@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 
-import type {AgentContext} from "@agentclientprotocol/sdk";
 import {startCodexConnection} from "./CodexJsonRpcConnection";
 import {CodexAcpServer, type CodexProcessState} from "./CodexAcpServer";
 import {createJsonStream} from "./StdUtils";
@@ -11,7 +10,8 @@ import packageJson from "../package.json";
 import {logger} from "./Logger";
 import {runLoginCommand} from "./login";
 import {runCodexCli} from "./CodexCli";
-import {createCodexAcpApp} from "./CodexAcpApp";
+import {createAcpAgentRouter} from "./AcpAgentRouter";
+import type {AcpClientConnection, AcpV2Connection} from "./ACPSessionConnection";
 
 if (process.argv.includes("--version")) {
     console.log(`${packageJson.name} ${packageJson.version}`);
@@ -78,7 +78,7 @@ function startAcpServer() {
 
     const acpJsonStream = createJsonStream(process.stdin, process.stdout);
 
-    function createAgent(connection: AgentContext): CodexAcpServer {
+    function createAgent(connection: AcpClientConnection | AcpV2Connection): CodexAcpServer {
         const appServerClient = new CodexAppServerClient(codexProcessState.connection.connection);
         const codexClient = new CodexAcpClient(appServerClient, config, modelProvider);
         return new CodexAcpServer(
@@ -92,5 +92,5 @@ function startAcpServer() {
         );
     }
 
-    createCodexAcpApp({name: packageJson.name, createAgent}).connect(acpJsonStream);
+    createAcpAgentRouter(createAgent).connect(acpJsonStream);
 }

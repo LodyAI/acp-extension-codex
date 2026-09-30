@@ -1,3 +1,4 @@
+import {airOnlyMeta, AIR_KIND_KEY} from "./AirExtension";
 import type {ApprovalsReviewer, AskForApproval, SandboxMode, SandboxPolicy} from "./app-server/v2";
 import type {SessionConfigOption, SessionMode, SessionModeState} from "@agentclientprotocol/sdk";
 
@@ -64,6 +65,8 @@ export class AgentMode {
         },
         "workspace-write",
     );
+    static get WorkspaceWrite(): AgentMode { return AgentMode.Agent; }
+
     static readonly AgentAutoReview = new AgentMode(
         "agent-auto-review",
         "Agent (auto review)",
@@ -93,23 +96,23 @@ export class AgentMode {
 
     static DEFAULT_AGENT_MODE = AgentMode.Agent;
 
-    toSessionMode(): SessionMode {
+    toSessionMode(airClient = false): SessionMode {
         return {
             id: this.id,
             name: this.name,
             description: this.description,
-            _meta: {kind: this.kind},
+            _meta: {kind: this.kind, ...airOnlyMeta(airClient, AIR_KIND_KEY, this.kind)},
         };
     }
 
-    toSessionModeState(): SessionModeState {
+    toSessionModeState(_airClient = false): SessionModeState {
         return {
-            availableModes: AgentMode.all().map(mode => mode.toSessionMode()),
+            availableModes: AgentMode.all().map(mode => mode.toSessionMode(_airClient)),
             currentModeId: this.id
         };
     }
 
-    toConfigOption(): SessionConfigOption {
+    toConfigOption(_airClient = false): SessionConfigOption {
         return {
             id: MODE_CONFIG_ID,
             name: "Mode",
@@ -121,7 +124,7 @@ export class AgentMode {
                 value: mode.id,
                 name: mode.name,
                 description: mode.description,
-                _meta: {kind: mode.kind},
+                _meta: {kind: mode.kind, ...airOnlyMeta(_airClient, AIR_KIND_KEY, mode.kind)},
             })),
         };
     }

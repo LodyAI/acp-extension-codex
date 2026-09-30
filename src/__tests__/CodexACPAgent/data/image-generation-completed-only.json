@@ -8,11 +8,6 @@
         "toolCallId": "image-generation-completed-only",
         "kind": "other",
         "title": "Image generation",
-        "_meta": {
-          "lody": {
-            "toolName": "ImageGeneration"
-          }
-        },
         "status": "completed",
         "content": [
           {
@@ -24,10 +19,10 @@
             }
           }
         ],
-        "rawOutput": {
-          "status": "generating",
-          "revisedPrompt": null,
-          "result": "iVBORw0KGgo="
+        "_meta": {
+          "lody": {
+            "toolName": "ImageGeneration"
+          }
         }
       }
     }

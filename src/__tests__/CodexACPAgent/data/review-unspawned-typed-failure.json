@@ -1,0 +1,29 @@
+{
+  "updates": [],
+  "response": {
+    "stopReason": "end_turn",
+    "usage": null,
+    "_meta": {
+      "quota": {
+        "token_count": null,
+        "model_usage": []
+      },
+      "jetbrains": {
+        "air": {
+          "version": 1,
+          "sessionFailure": {
+            "id": "review-parent-turn:error",
+            "revision": 1,
+            "category": "service",
+            "severity": "error",
+            "title": "Codex encountered an internal error.",
+            "actions": [
+              "retry",
+              "new_session"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,116 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "notice-session",
+      "update": {
+        "sessionUpdate": "session_info_update",
+        "_meta": {
+          "lody": {
+            "notice": {
+              "level": "warning",
+              "message": "Optional integration unavailable",
+              "source": "warning"
+            }
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "notice-session",
+      "update": {
+        "sessionUpdate": "session_info_update",
+        "_meta": {
+          "lody": {
+            "notice": {
+              "level": "warning",
+              "message": "Optional integration unavailable",
+              "source": "warning"
+            }
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "notice-session",
+      "update": {
+        "sessionUpdate": "session_info_update",
+        "_meta": {
+          "lody": {
+            "notice": {
+              "level": "warning",
+              "message": "  Configuration fallback  \n\nUsing the default configuration.\nCheck the configured path.",
+              "source": "configWarning"
+            }
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "notice-session",
+      "update": {
+        "sessionUpdate": "session_info_update",
+        "_meta": {
+          "jetbrains": {
+            "air": {
+              "version": 1,
+              "sessionFailure": {
+                "id": "id",
+                "revision": 1,
+                "category": "unknown",
+                "severity": "warning",
+                "title": "  Deprecated setting   — Use the replacement setting.",
+                "actions": []
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "notice-session",
+      "update": {
+        "sessionUpdate": "agent_thought_chunk",
+        "content": {
+          "type": "text",
+          "text": "Model rerouted from original-model to fallback-model (highRiskCyberActivity).\n\n"
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "notice-session",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "*Context compacted to fit the model's context window.*\n\n"
+        }
+      }
+    }
+  ]
+}

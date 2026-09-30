@@ -10,6 +10,14 @@
         "title": "Compact conversation",
         "status": "in_progress",
         "_meta": {
+          "jetbrains": {
+            "air": {
+              "version": 1,
+              "contextCompaction": {
+                "version": 1
+              }
+            }
+          },
           "lody": {
             "activity": {
               "version": 1,
@@ -29,16 +37,7 @@
       "update": {
         "sessionUpdate": "tool_call_update",
         "toolCallId": "context-compaction-id",
-        "title": "Compact conversation",
-        "status": "completed",
-        "_meta": {
-          "lody": {
-            "activity": {
-              "version": 1,
-              "kind": "context_compaction"
-            }
-          }
-        }
+        "status": "completed"
       }
     }
   ]

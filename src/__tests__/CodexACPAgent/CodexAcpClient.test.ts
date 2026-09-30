@@ -446,6 +446,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 availabilityNux: null,
                 modelSpecialty: null,
                 multiAgentVersion: null,
+                availableAccessPrograms: {cyber: []},
                 displayName: "gpt-5",
                 description: "test model",
                 hidden: false,
@@ -673,12 +674,12 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             thread: {id: "source-id", turns: []},
         } as any);
         vi.spyOn(codexAppServerClient, "threadTurnsList")
+            .mockResolvedValueOnce({data: [{id: "turn-2", items: []}], nextCursor: null, backwardsCursor: null} as any)
             .mockResolvedValueOnce({
-                data: [{id: "turn-2", items: [{type: "agentMessage", id: "new-item-2", text: "Same answer"}]}],
-                nextCursor: "second-page", backwardsCursor: null,
-            } as any)
-            .mockResolvedValueOnce({
-                data: [{id: "turn-1", items: [{type: "agentMessage", id: "new-item-1", text: "Same answer"}]}],
+                data: [
+                    {id: "turn-1", items: [{type: "agentMessage", id: "new-item-1", text: "Same answer"}]},
+                    {id: "turn-2", items: [{type: "agentMessage", id: "new-item-2", text: "Same answer"}]},
+                ],
                 nextCursor: null, backwardsCursor: null,
             } as any);
         const threadForkSpy = vi.spyOn(codexAppServerClient, "threadFork").mockResolvedValue({
@@ -1050,7 +1051,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             const dump = mockFixture.getAcpConnectionDump([]);
             expect(dump).toContain('"sessionId": "thread-id"');
             expect(dump).toContain('"sessionUpdate": "tool_call"');
-            expect(dump).toContain('"toolCallId": "mcp_startup.broken-mcp"');
+            expect(dump).toContain('"toolCallId": "mcp_startup.broken-mcp.');
             expect(dump).toContain('MCP server `broken-mcp` failed to start: boom');
         });
 
@@ -2255,9 +2256,9 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         }));
         expect(mockFixture.getAcpConnectionEvents([])).toContainEqual(expect.objectContaining({
             args: [expect.objectContaining({
-                update: {
+                update: expect.objectContaining({
                     sessionUpdate: "session_info_update",
-                    _meta: {
+                    _meta: expect.objectContaining({
                         lody: {
                             goal: {
                                 objective: "Ship the migration and keep tests green",
@@ -2269,8 +2270,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                                 updatedAtEpochSeconds: 1710000100,
                             },
                         },
-                    },
-                },
+                    }),
+                }),
             })],
         }));
     });
@@ -3758,6 +3759,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                     runtimeStatus: null,
                     pluginId: null,
                     serverInfo: null,
+                    httpOrigin: null,
+                    serverCapabilities: null,
                     toolsError: null,
                     tools: {listFiles: {name: "listFiles", inputSchema: {type: "object"}}},
                     resources: [{name: "workspace", uri: "file:///workspace"}],
@@ -3769,6 +3772,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                     runtimeStatus: null,
                     pluginId: null,
                     serverInfo: null,
+                    httpOrigin: null,
+                    serverCapabilities: null,
                     toolsError: null,
                     tools: {},
                     resources: [],
@@ -3819,6 +3824,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             availabilityNux: null,
             modelSpecialty: null,
             multiAgentVersion: null,
+            availableAccessPrograms: {cyber: []},
             displayName: 'Codex 5.2',
             description: 'Coding model',
             hidden: false,
@@ -3842,6 +3848,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             availabilityNux: null,
             modelSpecialty: null,
             multiAgentVersion: null,
+            availableAccessPrograms: {cyber: []},
             displayName: 'Standard 5.1',
             description: 'Standard model',
             hidden: false,

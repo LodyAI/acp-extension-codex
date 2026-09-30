@@ -13,9 +13,6 @@
           "lody": {
             "toolName": "ImageGeneration"
           }
-        },
-        "rawInput": {
-          "id": "image-generation-1"
         }
       }
     }
@@ -30,11 +27,6 @@
         "sessionUpdate": "tool_call_update",
         "toolCallId": "image-generation-1",
         "status": "completed",
-        "_meta": {
-          "lody": {
-            "toolName": "ImageGeneration"
-          }
-        },
         "content": [
           {
             "type": "content",
@@ -52,13 +44,7 @@
               "uri": "/tmp/codex/generated-blue-square.png"
             }
           }
-        ],
-        "rawOutput": {
-          "status": "generating",
-          "revisedPrompt": "A tiny blue square",
-          "result": "iVBORw0KGgo=",
-          "savedPath": "/tmp/codex/generated-blue-square.png"
-        }
+        ]
       }
     }
   ]

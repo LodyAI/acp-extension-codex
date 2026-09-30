@@ -1,0 +1,33 @@
+[
+  {
+    "sessionId": "session-1",
+    "update": {
+      "compactionId": "compaction-1",
+      "status": "in_progress",
+      "sessionUpdate": "compaction_update"
+    }
+  },
+  {
+    "sessionId": "session-1",
+    "update": {
+      "compactionId": "compaction-1",
+      "status": "completed",
+      "sessionUpdate": "compaction_update"
+    }
+  },
+  {
+    "sessionId": "session-1",
+    "update": {
+      "_meta": {
+        "lody": {
+          "notice": {
+            "level": "warning",
+            "message": "Optional integration unavailable",
+            "source": "warning"
+          }
+        }
+      },
+      "sessionUpdate": "session_info_update"
+    }
+  }
+]

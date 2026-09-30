@@ -1,3 +1,5 @@
+import type {UpdateSessionEvent} from "./ACPSessionConnection";
+import {AIR_GOAL_KEY, withAirMeta} from "./AirExtension";
 import {type GoalSnapshot, type GoalStatus} from "./GoalExtension";
 import type {ThreadGoal} from "./app-server/v2";
 
@@ -38,4 +40,12 @@ export function sameThreadGoalSnapshot(
         && left.status === right.status
         && left.tokenBudget === right.tokenBudget
         && left.createdAtEpochSeconds === right.createdAtEpochSeconds;
+}
+
+/** Keep the Core goal snapshot on every connection; add AIR metadata when negotiated. */
+export function goalSessionInfoUpdate(goal: ThreadGoalSnapshot | null, airClient: boolean): UpdateSessionEvent | null {
+    return {
+        sessionUpdate: "session_info_update",
+        _meta: {...(airClient ? withAirMeta(undefined, AIR_GOAL_KEY, goal) : {}), lody: {goal}},
+    };
 }

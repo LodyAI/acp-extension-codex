@@ -367,7 +367,7 @@ describe('CodexEventHandler - file change events', () => {
         ]);
     });
 
-    it('should not emit completion before a slow file-change start event', async () => {
+    it('reports file changes in order without waiting for client file reads', async () => {
         mockFileContent('/test/project/OldFile.kt', 'package test.project\n\nclass OldFile {}\n');
 
         let releaseRead = () => {};
@@ -439,7 +439,7 @@ describe('CodexEventHandler - file change events', () => {
         mockFixture.sendServerNotification(fileChangeCompleted);
 
         await new Promise((resolve) => setTimeout(resolve, 0));
-        expect(mockFixture.getAcpConnectionEvents([])).toEqual([]);
+        expect(mockFixture.getAcpConnectionEvents([])).toHaveLength(2);
 
         releaseRead();
         await vi.waitFor(() => {

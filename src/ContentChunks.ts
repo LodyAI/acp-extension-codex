@@ -1,3 +1,4 @@
+import {airOnlyMeta, AIR_MESSAGE_PHASE_KEY} from "./AirExtension";
 import type {ContentBlock} from "@agentclientprotocol/sdk";
 import type {UpdateSessionEvent} from "./ACPSessionConnection";
 
@@ -73,4 +74,9 @@ export function createAgentTextMessageChunk(text: string, messageId?: string, me
 
 export function createAgentTextThoughtChunk(text: string, messageId?: string, meta?: AcpMeta): UpdateSessionEvent {
     return createAgentThoughtChunk({type: "text", text}, messageId, meta);
+}
+
+export function createMessagePhaseMeta(phase: string | null | undefined, airClient = false): AcpMeta | undefined {
+    if (!phase) return undefined;
+    return {...createCodexMessagePhaseMeta(phase), ...airOnlyMeta(airClient, AIR_MESSAGE_PHASE_KEY, phase)};
 }

@@ -1,0 +1,27 @@
+{
+  "updates": [
+    {
+      "sessionUpdate": "agent_message_chunk",
+      "messageId": "agent-message",
+      "content": {
+        "type": "text",
+        "text": "Looks good."
+      },
+      "_meta": {
+        "lody": {
+          "turnId": "review-parent-turn"
+        }
+      }
+    }
+  ],
+  "response": {
+    "stopReason": "end_turn",
+    "usage": null,
+    "_meta": {
+      "quota": {
+        "token_count": null,
+        "model_usage": []
+      }
+    }
+  }
+}

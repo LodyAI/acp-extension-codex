@@ -21,6 +21,7 @@ function spawnCodexCli(codexPath: string | undefined, args: Array<string>): Chil
     const options: SpawnOptions = {
         env: process.env,
         stdio: "inherit",
+        windowsHide: true,
     };
 
     if (codexPath) {

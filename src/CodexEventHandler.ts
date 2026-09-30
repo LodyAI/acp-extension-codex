@@ -1,6 +1,6 @@
+import {randomUUID} from "node:crypto";
+import type {RateLimitSnapshot} from "./app-server/v2";
 import type {
-    FuzzyFileSearchSessionCompletedNotification,
-    FuzzyFileSearchSessionUpdatedNotification,
     ServerNotification
 } from "./app-server";
 import type {
@@ -20,12 +20,9 @@ import type {
     AccountUpdatedNotification,
     AgentMessageDeltaNotification,
     CodexErrorInfo,
-    CommandExecutionOutputDeltaNotification,
     ConfigWarningNotification,
     DeprecationNoticeNotification,
     ErrorNotification,
-    ItemGuardianApprovalReviewCompletedNotification,
-    ItemGuardianApprovalReviewStartedNotification,
     ItemCompletedNotification,
     ItemStartedNotification,
     PlanDeltaNotification,
@@ -34,8 +31,6 @@ import type {
     ReasoningSummaryPartAddedNotification,
     ReasoningSummaryTextDeltaNotification,
     ReasoningTextDeltaNotification,
-    RateLimitSnapshot,
-    TerminalInteractionNotification,
     ThreadGoalClearedNotification,
     ThreadGoalUpdatedNotification,
     ThreadTokenUsageUpdatedNotification,
@@ -43,7 +38,6 @@ import type {
     TurnPlanUpdatedNotification,
     WarningNotification
 } from "./app-server/v2";
-import type { McpStartupCompleteEvent } from "./app-server/McpStartupCompleteEvent";
 import {toTokenCount} from "./TokenCount";
 import {CodexTurnUsage} from "./CodexUsage";
 import {
@@ -68,7 +62,6 @@ import {
     createWebSearchStartUpdate,
     fuzzyFileSearchToolCallId,
 } from "./CodexToolCallMapper";
-import { stripShellPrefix } from "./CommandUtils";
 import {commandToolName, functionToolName} from "./ToolCallName";
 import {createTerminalOutputMeta, type TerminalOutputMode} from "./TerminalOutputMode";
 import {ReasoningSummaryFilter, sanitizeReasoningParts} from "./ReasoningText";
@@ -80,8 +73,24 @@ import {
 } from "./ContentChunks";
 import {sameThreadGoalSnapshot, type ThreadGoalSnapshot, toThreadGoalSnapshot} from "./ThreadGoalSnapshot";
 import {toLodyRateLimit} from "./LodyRateLimits";
+import { stripShellPrefix } from "./CommandUtils";
+import {AcpToolCallRenderer} from "./tool-calls/AcpToolCallRenderer";
+import {CommandReporter, commandUsesTerminal} from "./tool-calls/reporters/CommandReporter";
+import {CompactionReporter} from "./tool-calls/reporters/CompactionReporter";
+import {DynamicToolReporter} from "./tool-calls/reporters/DynamicToolReporter";
+import {FileChangeReporter} from "./tool-calls/reporters/FileChangeReporter";
+import {FuzzySearchReporter} from "./tool-calls/reporters/FuzzySearchReporter";
+import {GuardianReporter} from "./tool-calls/reporters/GuardianReporter";
+import {ImageGenerationReporter} from "./tool-calls/reporters/ImageGenerationReporter";
+import {ImageViewReporter} from "./tool-calls/reporters/ImageViewReporter";
+import {McpToolReporter} from "./tool-calls/reporters/McpToolReporter";
+import {WebSearchReporter} from "./tool-calls/reporters/WebSearchReporter";
+import {CodexPlanStream} from "./CodexPlanStream";
+import {
+    createMessagePhaseMeta,
+} from "./ContentChunks";
+import {goalSessionInfoUpdate} from "./ThreadGoalSnapshot";
 import {logger} from "./Logger";
-import {randomUUID} from "node:crypto";
 import {
     AIR_EXTENSION_VERSION,
     AIR_EXTENSION_VERSION_KEY,
@@ -102,7 +111,7 @@ const INTERNAL_INSTRUCTION_MARKERS = [
 const REDACTED_PROVIDER_ERROR_MESSAGE =
     "Provider error details omitted because they contained internal instructions.";
 
-function sanitizeProviderErrorText(text: string): string {
+export function sanitizeProviderErrorText(text: string): string {
     if (INTERNAL_INSTRUCTION_MARKERS.some(marker => text.includes(marker))) {
         return REDACTED_PROVIDER_ERROR_MESSAGE;
     }
@@ -111,6 +120,7 @@ function sanitizeProviderErrorText(text: string): string {
     }
     return `${text.slice(0, PROVIDER_ERROR_TEXT_MAX_CHARS - 3)}...`;
 }
+import {createSessionNotice} from "./SessionNotice";
 
 export { stripShellPrefix };
 
@@ -204,9 +214,11 @@ const STRING_CODEX_ERROR_CATEGORIES = {
     sessionBudgetExceeded: "budget_exhausted",
     usageLimitExceeded: "quota_exhausted",
     rateLimitExceeded: "rate_limited",
+    flexUnavailable: "provider_error",
     serverOverloaded: "overloaded",
     cyberPolicy: "policy_denied",
     misalignmentPolicyViolation: "policy_denied",
+    tooManyDenials: "provider_error",
     internalServerError: "internal_error",
     unauthorized: "auth_required",
     badRequest: "bad_request",
@@ -223,13 +235,36 @@ const STRUCTURED_CODEX_ERROR_CATEGORIES = {
     activeTurnNotSteerable: "provider_error",
 } satisfies Record<StructuredCodexErrorKind, CodexFailureKind>;
 
+/**
+ * Item types that render as a plain `tool_call`/`tool_call_update` and have no outstanding-item
+ * tracker of their own (`contextCompaction` has `CodexSessionCompactions`; `collabAgentToolCall`/
+ * `subAgentActivity` have `CodexSubagentEventRouter`). Used to track which open items a provider
+ * restart's close-out needs to fail.
+ */
+const PLAIN_TOOL_CALL_ITEM_TYPES = new Set<ThreadItem["type"]>([
+    "fileChange",
+    "commandExecution",
+    "mcpToolCall",
+    "dynamicToolCall",
+    "webSearch",
+    "imageView",
+    "imageGeneration",
+]);
+
+/** Prompt failures whose text the client has already received as an agent message. */
+const failuresShownAsMessages = new WeakSet<RequestError>();
+
+/** Whether a prompt failure's text has already been sent to the client as an agent message. */
+export function failureWasShownAsMessage(error: unknown): boolean {
+    return error instanceof RequestError && failuresShownAsMessages.has(error);
+}
+
 export class CodexEventHandler {
 
     private static readonly PLAN_UPDATE_INTERVAL_MS = 150;
 
     private readonly connection: AcpClientConnection;
     private readonly sessionState: SessionState;
-    private readonly supportsPlanUpdates: boolean;
     private readonly supportsTypedSessionFailures: boolean;
     private readonly sessionFailureEpoch: string;
     private readonly pendingErrors: ErrorNotification[] = [];
@@ -241,16 +276,14 @@ export class CodexEventHandler {
     private nextNoticeId = 1;
     private failure: RequestError | null = null;
     private completedPlan: CompletedPlan | null = null;
-    private readonly activeFuzzyFileSearchSessions = new Set<string>();
-    private readonly activeGuardianApprovalReviews = new Set<string>();
     private readonly activeImageGenerationItems = new Set<string>();
     private readonly emittedImageViewItems = new Set<string>();
-    private readonly planDeltaTextByItemId = new Map<string, string>();
-    private readonly pendingPlanItemIds = new Set<string>();
-    private readonly lastEmittedPlanTextByItemId = new Map<string, string>();
     private readonly session: ACPSessionConnection;
-    private planUpdateTimer: ReturnType<typeof setTimeout> | null = null;
-    private planUpdateChain: Promise<void> = Promise.resolve();
+    private readonly renderer: AcpToolCallRenderer;
+    private readonly commands = new CommandReporter();
+    private readonly fuzzySearches = new FuzzySearchReporter();
+    private readonly guardianReviews = new GuardianReporter();
+    private readonly plans: CodexPlanStream;
     private disposed = false;
     private readonly seenReasoningDeltaItemIds = new Set<string>();
     private readonly reasoningSummaryFilters = new Map<string, ReasoningSummaryFilter>();
@@ -267,7 +300,6 @@ export class CodexEventHandler {
     constructor(
         connection: AcpClientConnection,
         sessionState: SessionState,
-        supportsPlanUpdates = false,
         supportsTypedSessionFailures = false,
         sessionFailureEpoch: string = randomUUID(),
         subagents: CodexSubagentEventRouter = new CodexSubagentEventRouter(
@@ -277,15 +309,18 @@ export class CodexEventHandler {
         ),
         onAccountUpdated?: (notification: AccountUpdatedNotification) => void,
         collectTurnDiffs = false,
+        private readonly supportsCompaction = false,
+        private readonly supportsNotices = false,
     ) {
         connection = subagents.connectionForEvents(connection);
         this.connection = connection;
         this.onAccountUpdated = onAccountUpdated;
         this.sessionState = sessionState;
-        this.supportsPlanUpdates = supportsPlanUpdates;
         this.supportsTypedSessionFailures = supportsTypedSessionFailures;
         this.sessionFailureEpoch = sessionFailureEpoch;
         this.session = new ACPSessionConnection(connection, sessionState.sessionId);
+        this.renderer = new AcpToolCallRenderer(sessionState.clientCapabilities);
+        this.plans = new CodexPlanStream(this.session, sessionState.clientCapabilities);
         this.subagents = subagents;
         this.collectTurnDiffs = collectTurnDiffs;
         if (sessionState.sessionFailure !== undefined) {
@@ -343,6 +378,7 @@ export class CodexEventHandler {
             ...notification.params,
             error: this.sanitizeTurnError(notification.params.error),
         };
+        await this.finishCompactionsForNotification({method: "error", params: sanitizedParams});
         if (sanitizedParams.willRetry) {
             await this.session.update(this.createSessionFailureUpdate(this.recordRetryWarning(sanitizedParams, false)));
             return;
@@ -408,6 +444,10 @@ export class CodexEventHandler {
             additionalDetails: null,
             misalignment: null,
         });
+        if (this.isAuthenticationRequiredError(error.codexErrorInfo) && !this.sessionState.authConfigured) {
+            this.failure = RequestError.authRequired();
+            return;
+        }
         this.recordTypedSessionFailure({
             threadId: this.sessionState.sessionId,
             turnId: turn.id,
@@ -428,8 +468,13 @@ export class CodexEventHandler {
             return;
         }
         await this.flushPendingErrors();
+        await this.finishCompactionsForNotification(notification);
         const closingChildren = this.subagents.closingChildSessions(notification);
         for (const child of closingChildren) {
+            await this.finishOutstandingCompactions(
+                child.state === "cancelled" ? "cancelled" : "failed",
+                child.sessionId,
+            );
             await this.sessionState.asyncTasks.reconcile(child.threadId, child.sessionId);
         }
         const handledBySubagents = await this.subagents.handle(notification);
@@ -471,31 +516,56 @@ export class CodexEventHandler {
     }
 
     async waitForNativeSubagents(signal: AbortSignal): Promise<void> {
-        await this.subagents.wait(signal);
+        if (await this.subagents.wait(signal) === "timed_out") {
+            await this.finishOutstandingNativeSubagents("failed");
+        }
     }
 
     async finishOutstandingNativeSubagents(state: SubagentState): Promise<void> {
+        await this.finishOutstandingCompactions(state === "cancelled" ? "cancelled" : "failed");
         await this.subagents.finishOutstanding(state);
     }
 
+    async finishOutstandingCompactions(status: "failed" | "cancelled", sessionId?: string): Promise<void> {
+        if (!this.supportsCompaction) return;
+        for (const {sessionId: targetSessionId, update} of this.sessionState.compactions.finishOutstanding(status, sessionId)) {
+            await this.session.update(update, targetSessionId);
+        }
+    }
+
+    private async finishCompactionsForNotification(notification: ServerNotification): Promise<void> {
+        if (!this.supportsCompaction) return;
+        let updates: UpdateSessionEvent[];
+        const sessionId = this.subagents.notificationSessionId(notification);
+        if (notification.method === "turn/completed") {
+            const turn = notification.params.turn;
+            if (turn.status === "inProgress") return;
+            updates = this.sessionState.compactions.finishTurn(
+                sessionId,
+                turn.id,
+                turn.status === "interrupted" ? "cancelled" : "failed",
+                turn.error ? this.sanitizeTurnError(turn.error).message : "Codex ended the turn before compaction completed.",
+            );
+        } else if (notification.method === "error" && !notification.params.willRetry) {
+            updates = this.sessionState.compactions.finishTurn(
+                sessionId,
+                notification.params.turnId,
+                "failed",
+                this.sanitizeTurnError(notification.params.error).message,
+            );
+        } else {
+            return;
+        }
+        for (const update of updates) await this.session.update(update, sessionId);
+    }
+
     async flushPendingPlanUpdates(): Promise<void> {
-        this.cancelPlanUpdateTimer();
-        do {
-            const itemIds = [...this.pendingPlanItemIds];
-            this.pendingPlanItemIds.clear();
-            await Promise.all(itemIds.map(itemId => {
-                const text = this.planDeltaTextByItemId.get(itemId) ?? "";
-                return text.length > 0
-                    ? this.enqueuePlanSnapshot(itemId, text)
-                    : Promise.resolve();
-            }));
-            await this.planUpdateChain;
-        } while (this.pendingPlanItemIds.size > 0);
+        await this.plans.flush();
     }
 
     async dispose(): Promise<void> {
         if (this.disposed) return;
-        await this.flushPendingPlanUpdates();
+        await this.plans.dispose();
         if (this.pendingErrors.length > 0) {
             logger.log("Discarding app-server errors that arrived before a turn started", {
                 sessionId: this.sessionState.sessionId,
@@ -505,10 +575,6 @@ export class CodexEventHandler {
             this.pendingErrors.splice(0);
         }
         this.disposed = true;
-        this.cancelPlanUpdateTimer();
-        this.pendingPlanItemIds.clear();
-        this.planDeltaTextByItemId.clear();
-        this.lastEmittedPlanTextByItemId.clear();
         this.turnDiffs.clear();
         this.oversizedTurnDiffs.clear();
     }
@@ -527,12 +593,16 @@ export class CodexEventHandler {
                 return await this.createTextEvent(notification.params);
             case "item/plan/delta":
                 this.completeRetryIncidentOnTurnProgress();
-                return this.createPlanDeltaEvent(notification.params);
-            case "item/started":
+                return this.plans.delta(notification.params.itemId, notification.params.delta);
+            case "item/started": {
                 this.completeRetryIncidentOnTurnProgress();
-                return await this.createItemEvent(notification.params);
+                const update = await this.createItemEvent(notification.params);
+                this.trackOpenToolCall(notification.params.item);
+                return update;
+            }
             case "item/completed":
                 this.completeRetryIncidentOnTurnProgress();
+                this.sessionState.openToolCalls.complete(notification.params.item.id);
                 return await this.completeItemEvent(notification.params);
             case "turn/plan/updated":
                 this.completeRetryIncidentOnTurnProgress();
@@ -561,13 +631,21 @@ export class CodexEventHandler {
                     this.sessionState.turnUsage.start(notification.params.turn.id,
                         this.sessionState.currentModelId.replace(/\[.*?]$/, ""));
                 }
-                this.sessionState.currentTurnId = notification.params.turn.id;
+                this.sessionState.interruptTurnId = notification.params.turn.id;
+                // A review's child turn starts under its own id, while the review's items, errors and
+                // completion keep the parent id already set from the `review/start` response.
+                this.sessionState.currentTurnId ??= notification.params.turn.id;
                 await this.flushPendingErrors();
                 return null;
             case "turn/completed":
-                await this.flushPendingPlanUpdates();
-                this.clearPlanTurnState();
+                await this.plans.flush();
+                this.plans.clearTurn();
                 this.sessionState.currentTurnId = null;
+                this.sessionState.interruptTurnId = null;
+                this.sessionState.toolCallReports.releaseOpen(this.subagents.notificationSessionId(notification));
+                // An item that missed its item/completed (e.g. dropped by a provider restart
+                // mid-turn) must not linger past its own turn and get failed by a later restart.
+                this.sessionState.openToolCalls.clear();
                 return null;
             case "thread/tokenUsage/updated":
                 return this.createUsageUpdate(notification.params);
@@ -576,6 +654,7 @@ export class CodexEventHandler {
                 this.sessionState.sessionTitleSource = notification.params.threadName == null
                     ? "unset"
                     : "explicit";
+                this.sessionState.titleGen?.observeRename();
                 return {
                     sessionUpdate: "session_info_update",
                     title: notification.params.threadName ?? null,
@@ -603,10 +682,15 @@ export class CodexEventHandler {
                 });
             case "item/commandExecution/outputDelta":
                 this.completeRetryIncidentOnTurnProgress();
-                return this.createCommandOutputDeltaEvent(notification.params);
+                return this.renderer.render(this.commands.outputDelta(notification.params.itemId, notification.params.delta));
             case "item/mcpToolCall/progress":
                 this.completeRetryIncidentOnTurnProgress();
-                return this.createMcpToolProgressEvent(notification.params);
+                // AIR does not show MCP progress.
+                if (this.renderer.capabilities.airToolCallContract) return null;
+                return this.renderer.render(McpToolReporter.progress(
+                    notification.params.itemId,
+                    notification.params.message,
+                ));
             case "account/rateLimits/updated":
                 return null;
             case "account/updated":
@@ -621,11 +705,15 @@ export class CodexEventHandler {
             case "deprecationNotice":
                 return this.createDeprecationNoticeEvent(notification.params);
             case "item/autoApprovalReview/started":
-                return this.handleGuardianApprovalReviewStarted(notification.params);
+                return this.renderer.render(this.guardianReviews.started(notification.params));
             case "item/autoApprovalReview/completed":
-                return this.handleGuardianApprovalReviewCompleted(notification.params);
+                return this.renderer.render(this.guardianReviews.completed(notification.params));
             case "thread/compacted":
-                return this.createContextCompactedEvent();
+                return this.supportsCompaction
+                    ? this.sessionState.compactions.completeLegacy(
+                        this.subagents.notificationSessionId(notification), notification.params.turnId,
+                    )
+                    : this.createContextCompactedEvent();
             case "item/reasoning/summaryTextDelta":
                 this.completeRetryIncidentOnTurnProgress();
                 return this.createReasoningSummaryDeltaEvent(notification.params);
@@ -638,15 +726,24 @@ export class CodexEventHandler {
             case "model/rerouted":
                 return this.createModelReroutedEvent(notification.params);
             case "fuzzyFileSearch/sessionUpdated":
-                return this.handleFuzzyFileSearchSessionUpdated(notification.params);
+                return this.renderer.render(this.fuzzySearches.updated(notification.params));
             case "fuzzyFileSearch/sessionCompleted":
-                return this.handleFuzzyFileSearchSessionCompleted(notification.params);
+                return this.renderer.render(this.fuzzySearches.completed(notification.params));
             case "thread/goal/updated":
                 return this.createThreadGoalUpdatedEvent(notification.params);
             case "thread/goal/cleared":
                 return this.createThreadGoalClearedEvent(notification.params);
             case "item/commandExecution/terminalInteraction":
-                return this.createTerminalInteractionEvent(notification.params);
+                return this.renderer.render(this.commands.terminalInput(
+                    notification.params.itemId,
+                    notification.params.stdin,
+                ));
+            case "thread/attachment/updated":
+                // Persisted attachment metadata has no ACP session update counterpart.
+                return null;
+            case "account/gatewayOAuth/changed":
+                // Gateway login state is account-scoped and has no ACP session update counterpart.
+                return null;
             // ignored events
             case "thread/deleted":
             case "thread/reverted":
@@ -737,7 +834,7 @@ export class CodexEventHandler {
         return createAgentTextMessageChunk(
             event.delta,
             event.itemId,
-            createCodexAgentMessageMeta(phase, event.turnId),
+            {...createMessagePhaseMeta(phase, this.sessionState.clientCapabilities.airClient), ...createCodexAgentMessageMeta(phase, event.turnId)},
         );
     }
 
@@ -764,12 +861,11 @@ export class CodexEventHandler {
         };
     }
 
-    /**
-     * Unlike `warning` and `configWarning`, this notification was dropped outright, so there is no
-     * legacy rendering to preserve. It is surfaced only to clients that negotiated typed records;
-     * every other client keeps seeing exactly what it sees today, which is nothing.
-     */
     private createDeprecationNoticeEvent(event: DeprecationNoticeNotification): UpdateSessionEvent | null {
+        if (this.supportsNotices) {
+            return createSessionNotice("warning", event.summary.trim() || "Deprecated configuration", event.details);
+        }
+        // Legacy clients without typed failures have never received deprecation notices.
         if (!this.supportsTypedSessionFailures) return null;
         return this.createSessionFailureUpdate(
             this.recordSessionNotice(...this.sessionNoticeContent(event.summary, event.details)),
@@ -777,7 +873,14 @@ export class CodexEventHandler {
     }
 
     private createModelReroutedEvent(event: ModelReroutedNotification): UpdateSessionEvent {
-        return createAgentTextThoughtChunk(`Model rerouted from ${event.fromModel} to ${event.toModel} (${event.reason}).\n\n`);
+        if (!this.supportsNotices) {
+            return createAgentTextThoughtChunk(`Model rerouted from ${event.fromModel} to ${event.toModel} (${event.reason}).\n\n`);
+        }
+        return createSessionNotice(
+            "info",
+            "Model rerouted",
+            `Switched from ${event.fromModel} to ${event.toModel} (${event.reason}).`,
+        );
     }
 
     private createThreadGoalUpdatedEvent(event: ThreadGoalUpdatedNotification): UpdateSessionEvent | null {
@@ -788,7 +891,7 @@ export class CodexEventHandler {
         }
         this.sessionState.currentGoal = goalSnapshot;
 
-        return this.createGoalSessionInfoUpdate(goalSnapshot);
+        return goalSessionInfoUpdate(goalSnapshot, this.sessionState.clientCapabilities.airClient);
     }
 
     private createThreadGoalClearedEvent(_event: ThreadGoalClearedNotification): UpdateSessionEvent | null {
@@ -798,7 +901,7 @@ export class CodexEventHandler {
         }
         this.sessionState.currentGoal = null;
 
-        return this.createGoalSessionInfoUpdate(null);
+        return goalSessionInfoUpdate(null, this.sessionState.clientCapabilities.airClient);
     }
 
     private createGoalSessionInfoUpdate(goal: ThreadGoalSnapshot | null): UpdateSessionEvent {
@@ -824,20 +927,6 @@ export class CodexEventHandler {
         return this.createAgentThoughtEvent(event.delta, event.itemId);
     }
 
-    private createPlanDeltaEvent(event: PlanDeltaNotification): null {
-        if (event.delta.length === 0) {
-            return null;
-        }
-        const text = this.planDeltaTextByItemId.get(event.itemId) ?? "";
-        const updatedText = text + event.delta;
-        this.planDeltaTextByItemId.set(event.itemId, updatedText);
-        if (this.supportsPlanUpdates) {
-            this.pendingPlanItemIds.add(event.itemId);
-            this.schedulePlanUpdate();
-        }
-        return null;
-    }
-
     private createReasoningSectionBreakEvent(event: ReasoningSummaryPartAddedNotification): UpdateSessionEvent {
         this.seenReasoningDeltaItemIds.add(event.itemId);
         const trailingText = this.finishReasoningSummaryFilter(event.itemId);
@@ -860,37 +949,38 @@ export class CodexEventHandler {
     private async createItemEvent(event: ItemStartedNotification): Promise<UpdateSessionEvent | null> {
         switch (event.item.type) {
             case "fileChange":
-                return await createFileChangeUpdate(event.item);
-            case "commandExecution": {
-                if (commandExecutionUsesTerminalOutput(event.item)) {
-                    this.terminalCommandIds.add(event.item.id);
-                } else {
-                    this.terminalCommandIds.delete(event.item.id);
-                    this.terminalCommandOutputIds.delete(event.item.id);
-                }
-                return await createCommandExecutionUpdate(event.item);
-            }
+                return this.renderer.render(FileChangeReporter.started(
+                    event.item,
+                    this.sessionState.clientCapabilities.diffPatchFormat,
+                ));
+            case "commandExecution":
+                return this.renderer.render(this.commands.started(event.item));
             case "mcpToolCall":
-                return await createMcpToolCallUpdate(event.item);
+                return this.renderer.render(McpToolReporter.started(event.item));
             case "dynamicToolCall":
-                return await createDynamicToolCallUpdate(event.item);
+                return this.renderer.render(DynamicToolReporter.started(event.item));
             case "webSearch":
-                return createWebSearchStartUpdate(event.item);
+                return this.renderer.render(WebSearchReporter.started(event.item));
             case "imageView":
                 this.emittedImageViewItems.add(event.item.id);
-                return createImageViewUpdate(event.item);
+                return this.renderer.render(ImageViewReporter.viewed(event.item));
             case "imageGeneration":
                 this.activeImageGenerationItems.add(event.item.id);
-                return createImageGenerationStartUpdate(event.item);
+                return this.renderer.render(ImageGenerationReporter.started(event.item));
             case "collabAgentToolCall":
-                return this.subagents.legacyCollaborationStarted(event.item);
+                return this.renderer.render(this.subagents.legacyCollaborationStarted(event.item));
             case "agentMessage":
                 this.rememberAgentMessagePhase(event.item);
                 return null;
             case "contextCompaction":
-                return createContextCompactionStartUpdate(event.item);
+                return this.supportsCompaction
+                    ? this.sessionState.compactions.start(
+                        this.subagents.notificationSessionId({method: "item/started", params: event}),
+                        event.turnId, event.item.id,
+                    )
+                    : this.renderer.render(CompactionReporter.started(event.item));
             case "subAgentActivity":
-                return this.subagents.legacyActivityStarted(event.item);
+                return this.renderer.render(this.subagents.legacyActivityStarted(event.item));
             case "sleep":
             case "functionCallOutput":
             case "userMessage":
@@ -906,38 +996,22 @@ export class CodexEventHandler {
     private async completeItemEvent(event: ItemCompletedNotification): Promise<UpdateSessionEvent | null> {
         switch (event.item.type) {
             case "fileChange":
-                return {
-                    sessionUpdate: "tool_call_update",
-                    toolCallId: event.item.id,
-                    status: event.item.status === "completed" ? "completed" : "failed",
-                }
+                return this.renderer.render(FileChangeReporter.completed(event.item));
             case "dynamicToolCall":
-                return {
-                    sessionUpdate: "tool_call_update",
-                    toolCallId: event.item.id,
-                    name: functionToolName(event.item.tool, event.item.namespace),
-                    status: event.item.status === "completed" ? "completed" : "failed",
-                }
+                return this.renderer.render(DynamicToolReporter.completed(event.item));
             case "mcpToolCall":
-                return {
-                    sessionUpdate: "tool_call_update",
-                    toolCallId: event.item.id,
-                    status: event.item.status === "completed" ? "completed" : "failed",
-                    rawInput: createMcpRawInput(event.item.server, event.item.tool, event.item.arguments),
-                    rawOutput: createMcpRawOutput(event.item.result, event.item.error),
-                }
+                return this.renderer.render(McpToolReporter.completed(event.item));
             case "commandExecution":
-                return this.completeCommandExecutionEvent(event.item);
+                return this.renderer.render(this.commands.completed(event.item, true));
             case "imageView":
                 if (this.emittedImageViewItems.delete(event.item.id)) {
                     return null;
                 }
-                return createImageViewUpdate(event.item);
+                return this.renderer.render(ImageViewReporter.viewed(event.item));
             case "imageGeneration":
-                if (this.activeImageGenerationItems.delete(event.item.id)) {
-                    return createImageGenerationCompleteUpdate(event.item);
-                }
-                return createImageGenerationUpdate(event.item, { terminalStatus: true });
+                return this.renderer.render(this.activeImageGenerationItems.delete(event.item.id)
+                    ? ImageGenerationReporter.completed(event.item)
+                    : ImageGenerationReporter.whole(event.item));
             case "reasoning":
                 if (this.seenReasoningDeltaItemIds.delete(event.item.id)) {
                     const trailingText = this.finishReasoningSummaryFilter(event.item.id);
@@ -947,30 +1021,32 @@ export class CodexEventHandler {
                 }
                 return this.createCompletedReasoningEvent(event.item);
             case "webSearch":
-                return createWebSearchCompleteUpdate(event.item);
+                return this.renderer.render(WebSearchReporter.completed(event.item));
             case "collabAgentToolCall":
-                return this.subagents.legacyCollaborationCompleted(event.item);
+                return this.renderer.render(this.subagents.legacyCollaborationCompleted(event.item));
             case "agentMessage":
                 this.rememberAgentMessagePhase(event.item);
                 return null;
-            case "plan": {
-                const deltaText = this.planDeltaTextByItemId.get(event.item.id) ?? "";
-                return await this.createCompletedPlanEvent(event.item, deltaText);
-            }
+            case "plan":
+                return await this.createCompletedPlanEvent(event.item);
             case "exitedReviewMode":
                 return this.createExitedReviewModeEvent(event.item);
             case "contextCompaction":
-                return createContextCompactionCompleteUpdate(event.item);
-            //ignored types
+                return this.supportsCompaction
+                    ? this.sessionState.compactions.complete(
+                        this.subagents.notificationSessionId({method: "item/completed", params: event}),
+                        event.turnId, event.item.id,
+                    )
+                    : this.renderer.render(CompactionReporter.completed(event.item));
             case "subAgentActivity":
-                return this.subagents.legacyActivityCompleted(event.item);
+                return this.renderer.render(this.subagents.legacyActivityCompleted(event.item));
+            //ignored types
             case "sleep":
             case "functionCallOutput":
             case "userMessage":
             case "hookPrompt":
             case "enteredReviewMode":
                 return null;
-
         }
     }
 
@@ -986,78 +1062,11 @@ export class CodexEventHandler {
         return this.createAgentThoughtEvent(text, item.id);
     }
 
-    private async createCompletedPlanEvent(
-        item: ThreadItem & { type: "plan" },
-        deltaText: string,
-    ): Promise<UpdateSessionEvent | null> {
-        const text = item.text.length > 0 ? item.text : deltaText;
-        this.pendingPlanItemIds.delete(item.id);
-        if (this.pendingPlanItemIds.size === 0) {
-            this.cancelPlanUpdateTimer();
-        }
-        this.planDeltaTextByItemId.delete(item.id);
-        if (text.length === 0) {
-            return null;
-        }
-        this.completedPlan = {itemId: item.id, text};
-        if (this.supportsPlanUpdates) {
-            await this.enqueuePlanSnapshot(item.id, text);
-            return null;
-        }
-        return this.createPlanTextEvent(text, item.id);
-    }
-
-    private schedulePlanUpdate(): void {
-        if (this.disposed || this.planUpdateTimer !== null) return;
-        this.planUpdateTimer = setTimeout(() => {
-            this.planUpdateTimer = null;
-            void this.flushPendingPlanUpdates().catch(error => {
-                logger.error("Failed to flush throttled plan updates", error);
-            });
-        }, CodexEventHandler.PLAN_UPDATE_INTERVAL_MS);
-    }
-
-    private cancelPlanUpdateTimer(): void {
-        if (this.planUpdateTimer === null) return;
-        clearTimeout(this.planUpdateTimer);
-        this.planUpdateTimer = null;
-    }
-
-    private enqueuePlanSnapshot(itemId: string, text: string): Promise<void> {
-        const send = async () => {
-            if (this.lastEmittedPlanTextByItemId.get(itemId) === text) return;
-            await this.session.update(this.createPlanUpdateEvent(text, itemId));
-            this.lastEmittedPlanTextByItemId.set(itemId, text);
-        };
-        const result = this.planUpdateChain.then(send);
-        this.planUpdateChain = result.catch(() => {});
-        return result;
-    }
-
-    private clearPlanTurnState(): void {
-        this.cancelPlanUpdateTimer();
-        this.pendingPlanItemIds.clear();
-        this.planDeltaTextByItemId.clear();
-        this.lastEmittedPlanTextByItemId.clear();
-    }
-
-    private createPlanUpdateEvent(text: string, planId: string): UpdateSessionEvent {
-        return {
-            sessionUpdate: "plan_update",
-            plan: {
-                type: "markdown",
-                planId,
-                content: text,
-            },
-        };
-    }
-
-    private createPlanTextEvent(text: string, messageId: string): UpdateSessionEvent {
-        return createAgentTextMessageChunk(
-            text,
-            messageId,
-            createCodexMessagePhaseMeta("final_answer"),
-        );
+    private async createCompletedPlanEvent(item: ThreadItem & { type: "plan" }): Promise<UpdateSessionEvent | null> {
+        const completed = await this.plans.completed(item.id, item.text);
+        if (completed === null) return null;
+        this.completedPlan = {itemId: item.id, text: completed.text};
+        return completed.update;
     }
 
     private createExitedReviewModeEvent(item: ThreadItem & { type: "exitedReviewMode" }): UpdateSessionEvent | null {
@@ -1069,125 +1078,20 @@ export class CodexEventHandler {
     }
 
     private createContextCompactedEvent(): UpdateSessionEvent {
-        return createAgentTextMessageChunk("*Context compacted to fit the model's context window.*\n\n");
-    }
-
-    private createCommandOutputDeltaEvent(event: CommandExecutionOutputDeltaNotification): UpdateSessionEvent {
-        if (this.terminalCommandIds.has(event.itemId) && event.delta.length > 0) {
-            this.terminalCommandOutputIds.add(event.itemId);
+        if (!this.supportsNotices) {
+            return createAgentTextMessageChunk("*Context compacted to fit the model's context window.*\n\n");
         }
-        return this.createCommandOutputEvent(event.itemId, event.delta, this.commandOutputMode(event.itemId));
+        return createSessionNotice(
+            "info",
+            "Context compacted",
+            "Conversation compacted to fit the model's context window.",
+        );
     }
 
-    private createCommandOutputEvent(
-        itemId: string,
-        data: string,
-        terminalOutputMode: TerminalOutputMode
-    ): UpdateSessionEvent {
-        return {
-            sessionUpdate: "tool_call_update",
-            toolCallId: itemId,
-            _meta: createTerminalOutputMeta(terminalOutputMode, itemId, data),
-        }
-    }
-
-    private createTerminalInteractionEvent(event: TerminalInteractionNotification): UpdateSessionEvent {
-        return this.createCommandOutputDeltaEvent({
-            threadId: event.threadId,
-            turnId: event.turnId,
-            itemId: event.itemId,
-            delta: `\n${event.stdin}\n`,
-        });
-    }
-
-    private commandOutputMode(itemId: string): TerminalOutputMode {
-        if (this.sessionState.terminalOutputMode === "terminal_output" && !this.terminalCommandIds.has(itemId)) {
-            return "terminal_output_delta";
-        }
-        return this.sessionState.terminalOutputMode;
-    }
-
-    private createMcpToolProgressEvent(event: { itemId: string, message: string }): UpdateSessionEvent {
-        const logDelta = event.message.trim();
-        return {
-            sessionUpdate: "tool_call_update",
-            toolCallId: event.itemId,
-            _meta: {
-                mcp_output_delta: {
-                    data: logDelta,
-                }
-            }
-        };
-    }
-
-    static createMcpStartupUpdates(event: McpStartupCompleteEvent): UpdateSessionEvent[] {
-        const failedUpdates = event.failed.map((server: McpStartupCompleteEvent["failed"][number]) => this.createMcpStartupToolCallUpdate(
-            server.server,
-            `[acp-extension-codex forwarded startup error] MCP server \`${server.server}\` failed to start: ${server.error}`
-        ));
-        const cancelledUpdates = event.cancelled.map((server: McpStartupCompleteEvent["cancelled"][number]) => this.createMcpStartupToolCallUpdate(
-            server,
-            `[acp-extension-codex forwarded startup error] MCP server \`${server}\` startup was cancelled.`
-        ));
-
-        return [...failedUpdates, ...cancelledUpdates];
-    }
-
-    private static createMcpStartupToolCallUpdate(serverName: string, message: string): UpdateSessionEvent {
-        return {
-            sessionUpdate: "tool_call",
-            toolCallId: this.getMcpStartupToolCallId(serverName),
-            kind: "other",
-            title: `mcp__${serverName}__startup`,
-            status: "failed",
-            content: [{
-                type: "content",
-                content: {
-                    type: "text",
-                    text: message,
-                },
-            }],
-        };
-    }
-
-    private static getMcpStartupToolCallId(serverName: string): string {
-        return `mcp_startup.${encodeURIComponent(serverName)}`;
-    }
-
-    private completeCommandExecutionEvent(item: ThreadItem & { "type": "commandExecution" }): UpdateSessionEvent {
-        const name = commandToolName(item.source);
-        const update: UpdateSessionEvent = {
-            sessionUpdate: "tool_call_update",
-            toolCallId: item.id,
-            ...(name === undefined ? {} : {name}),
-            status: item.status === "completed" ? "completed" : "failed",
-            rawOutput: {
-                formatted_output: item.aggregatedOutput ?? "",
-                exit_code: item.exitCode
-            },
-        };
-
-        const commandHadTerminal = this.terminalCommandIds.delete(item.id);
-        const commandHadOutput = this.terminalCommandOutputIds.delete(item.id);
-        if (!commandHadTerminal) {
-            return update;
-        }
-        const terminalMeta: Record<string, unknown> = {};
-        if (!commandHadOutput && item.aggregatedOutput) {
-            Object.assign(
-                terminalMeta,
-                createTerminalOutputMeta(this.sessionState.terminalOutputMode, item.id, item.aggregatedOutput)
-            );
-        }
-        terminalMeta["terminal_exit"] = {
-            exit_code: item.exitCode,
-            signal: null,
-            terminal_id: item.id
-        };
-        return {
-            ...update,
-            _meta: terminalMeta,
-        };
+    private trackOpenToolCall(item: ThreadItem): void {
+        if (!PLAIN_TOOL_CALL_ITEM_TYPES.has(item.type)) return;
+        const hasTerminal = item.type === "commandExecution" && commandUsesTerminal(item);
+        this.sessionState.openToolCalls.start(item.id, hasTerminal);
     }
 
     private async updatePlan(event: TurnPlanUpdatedNotification): Promise<UpdateSessionEvent> {
@@ -1243,6 +1147,10 @@ export class CodexEventHandler {
                     willRetry: true,
                 },
             });
+        }
+        if (this.isAuthenticationRequiredError(error) && !this.sessionState.authConfigured) {
+            this.failure = RequestError.authRequired();
+            return null;
         }
         if (this.supportsTypedSessionFailures) {
             // app-server guarantees willRetry=false interrupts this turn; the terminal failure is
@@ -1524,41 +1432,6 @@ export class CodexEventHandler {
         return snapshot;
     }
 
-    private handleFuzzyFileSearchSessionUpdated(
-        params: FuzzyFileSearchSessionUpdatedNotification
-    ): UpdateSessionEvent {
-        const toolCallId = fuzzyFileSearchToolCallId(params.sessionId);
-        const started = !this.activeFuzzyFileSearchSessions.has(toolCallId);
-        this.activeFuzzyFileSearchSessions.add(toolCallId);
-        return createFuzzyFileSearchStartOrUpdate(params, started);
-    }
-
-    private handleFuzzyFileSearchSessionCompleted(
-        params: FuzzyFileSearchSessionCompletedNotification
-    ): UpdateSessionEvent {
-        const toolCallId = fuzzyFileSearchToolCallId(params.sessionId);
-        this.activeFuzzyFileSearchSessions.delete(toolCallId);
-        return createFuzzyFileSearchComplete(params);
-    }
-
-    private handleGuardianApprovalReviewStarted(
-        params: ItemGuardianApprovalReviewStartedNotification
-    ): UpdateSessionEvent {
-        if (this.activeGuardianApprovalReviews.has(params.reviewId)) {
-            return createGuardianApprovalReviewToolCallUpdate(params);
-        }
-        this.activeGuardianApprovalReviews.add(params.reviewId);
-        return createGuardianApprovalReviewToolCall(params);
-    }
-
-    private handleGuardianApprovalReviewCompleted(
-        params: ItemGuardianApprovalReviewCompletedNotification
-    ): UpdateSessionEvent {
-        if (this.activeGuardianApprovalReviews.delete(params.reviewId)) {
-            return createGuardianApprovalReviewToolCallUpdate(params);
-        }
-        return createGuardianApprovalReviewToolCall(params);
-    }
 }
 
 function toolCallTitle(update: UpdateSessionEvent | null | undefined): string | undefined {
