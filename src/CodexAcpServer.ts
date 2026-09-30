@@ -3075,7 +3075,8 @@ export class CodexAcpServer {
         unreadableChildren: Set<string>,
         isOpen: () => boolean,
     ): Promise<void> {
-        const session = new ACPSessionConnection(this.connection, sessionId);
+        const session = new ACPSessionConnection(
+            sessionState.subagents.connectionForEvents(this.connection), sessionId);
         const announced = new Map<string, {generation: number; sessionId: string; terminal: boolean}>();
         // v2 only (this path also serves v1's native replay, unchanged there).
         const startedReplayMessages = new Set<string>();

@@ -3,6 +3,7 @@ import type * as acp from "@agentclientprotocol/sdk";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { LODY_SUBAGENT_EVENT_METHOD } from "acp-extension-core";
 import { createCodexMockTestFixture, createTestModel } from "../acp-test-utils";
 import type { Model, Thread, ThreadGoal } from "../../app-server/v2";
 
@@ -51,7 +52,7 @@ describe("CodexACPAgent - loadSession", () => {
         expect(logout).not.toHaveBeenCalled();
     });
 
-    it("replays native child history and disconnects an orphan", async () => {
+    it.each(["native", "lody"] as const)("replays %s child history and disconnects an orphan", async (transport) => {
         const fixture = createCodexMockTestFixture();
         const agent = fixture.getCodexAcpAgent();
         const client = fixture.getCodexAcpClient();
@@ -209,10 +210,43 @@ describe("CodexACPAgent - loadSession", () => {
         await agent.initialize({
             protocolVersion: 1,
             clientCapabilities: {
-                _meta: {jetbrains: {air: {version: 1, capabilities: ["nativeSubagentSessions", "asyncTasks"]}}},
+                _meta: transport === "lody"
+                    ? {lody: {subagentEvents: {version: 1}}}
+                    : {jetbrains: {air: {version: 1, capabilities: ["nativeSubagentSessions", "asyncTasks"]}}},
             },
         });
         await agent.loadSession({sessionId: root.id, cwd: "/workspace", mcpServers: []});
+
+        if (transport === "lody") {
+            const notifications = fixture.getAcpConnectionEvents([]);
+            const events = notifications
+                .filter(event => event.method === "notify" && event.args[0] === LODY_SUBAGENT_EVENT_METHOD)
+                .map(event => event.args[1]);
+            expect(events).toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    sessionId: root.id,
+                    type: "snapshot",
+                    snapshot: expect.objectContaining({name: "History child", state: "running"}),
+                }),
+                expect.objectContaining({
+                    sessionId: root.id,
+                    type: "output",
+                    update: expect.objectContaining({sessionUpdate: "agent_message_chunk"}),
+                }),
+                expect.objectContaining({
+                    sessionId: root.id,
+                    type: "snapshot",
+                    snapshot: expect.objectContaining({state: "unknown", outputIncomplete: true}),
+                }),
+            ]));
+            expect(notifications.filter(event => event.method === "sessionUpdate")
+                .map(event => event.args[0].update.sessionUpdate))
+                .not.toContain("subagent_spawned");
+            expect(notifications.filter(event => event.method === "sessionUpdate")
+                .map(event => event.args[0].update.sessionUpdate))
+                .not.toContain("subagent_state_update");
+            return;
+        }
 
         const updates = fixture.getAcpConnectionEvents([])
             .filter(event => event.method === "sessionUpdate")
