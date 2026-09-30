@@ -187,3 +187,31 @@ worktree project ownership, and structured notices retain their Core contracts.
 
 See the [diff statistics specification](docs/diff-statistics-extension.md) for the
 `_meta.jetbrains.air.diffStats` payload and its compatibility rules.
+
+
+## Upstream ACP v2 merge (2026-09-30)
+
+Upstream `agentclientprotocol/codex-acp` main at `ba7b216` adds ACP v2 routing,
+streamed history replay, tool-call reporters with exact patches, terminal delta
+output, MCP startup waiting, and Codex 0.159.1. The SDK is now 1.5.x;
+`acp-extension-core` remains pinned to 0.1.9.
+
+Existing Core hosts can continue initializing protocol version 1. Core extension
+method names, steer IDs/applied acknowledgements, usage scopes, native fork turn
+IDs, managed profiles, worktree projects, elicitation answer notes, and structured
+warning/error metadata remain supported. Core mode IDs and defaults are retained.
+ACP v1 prompts still wait for native completion, including goal continuations and
+manual compact/review ownership. ACP v2 is selected explicitly at initialization;
+its prompt response acknowledges insertion and completion arrives through session
+state updates. A Core host must implement that lifecycle before opting into v2.
+
+Core steering remains inject-or-refuse on both routes: `_lody/session/steer`
+requires `steerId`, never starts a replacement turn, and retains ambiguous errors.
+AIR metadata is additive when negotiated. Tool updates can omit unchanged fields;
+clients must merge updates with the existing tool call. Legacy terminal output is
+retained for clients declaring `_meta.terminal_output`; otherwise output uses deltas.
+
+New request option `_meta.mcpStartupAwaitTimeoutMs` on session new/resume/fork is
+an optional positive millisecond budget for awaiting requested MCP servers. Omitted
+or nonpositive values do not wait; expiry does not cancel startup. Session load
+ignores this option. See [MCP startup waiting](docs/mcp-startup-await-timeout.md).

@@ -1,3 +1,4 @@
+import {AIR_COMMAND_ACTION_KEY, withAirMeta} from "./AirExtension";
 import type * as acp from "@agentclientprotocol/sdk";
 import {RequestError, type AvailableCommand} from "@agentclientprotocol/sdk";
 import {ACPSessionConnection, type AcpClientConnection} from "./ACPSessionConnection";
@@ -58,6 +59,7 @@ export function resolveGoalCommandHandleResult(
 export type CommandHandleOptions = {
     onTurnStartPending?: () => void;
     onTurnStarted?: (turnId: string, threadId: string) => void;
+    onCommandAccepted?: () => void;
     onNativeCommandStarted?: () => void;
     onNativeCommandFinished?: () => void;
     setConfigOption?: (configId: string, value: string | boolean) => Promise<void>;
@@ -66,6 +68,7 @@ export type CommandHandleOptions = {
 export type LogoutHandler = () => void | Promise<void>;
 
 export class CodexCommands {
+    private readonly lastPublishedCommands = new WeakMap<SessionState, string>();
     private readonly connection: AcpClientConnection;
     private readonly codexAcpClient: CodexAcpClient;
     private readonly runWithProcessCheck: <T>(operation: () => Promise<T>) => Promise<T>;
@@ -83,10 +86,42 @@ export class CodexCommands {
         this.onLogout = onLogout;
     }
 
+    classifyPrompt(prompt: acp.ContentBlock[]): PromptKind {
+        const command = this.parseCommand(prompt);
+        if (command === null || command.name.startsWith("$")) return {kind: "prompt"};
+        switch (command.name) {
+            case "plan":
+            case "status":
+            case "rename":
+            case "logout":
+            case "skills":
+            case "mcp":
+                return {kind: "localCommand", name: command.name};
+            case "compact":
+            case "review":
+                return {kind: "codexTurnCommand", name: command.name};
+            case "review-branch":
+            case "review-commit":
+                return command.rest.length === 0
+                    ? {kind: "localCommand", name: command.name}
+                    : {kind: "codexTurnCommand", name: command.name};
+            case "goal": {
+                const argument = command.rest.trim().toLowerCase();
+                if (argument.length === 0 || argument === "pause" || argument === "clear" || argument.length > 4000) {
+                    return {kind: "localCommand", name: command.name};
+                }
+                return {kind: "codexTurnCommand", name: command.name};
+            }
+            default:
+                return {kind: "prompt"};
+        }
+    }
+
     async publish(
         sessionState: SessionState,
         availableCommands?: AvailableCommand[],
         shouldPublish: () => boolean = () => true,
+        onlyChanges = false,
     ): Promise<void> {
         try {
             if (!shouldPublish()) {
@@ -97,6 +132,9 @@ export class CodexCommands {
                 return;
             }
 
+            const signature = JSON.stringify(commands);
+            if (onlyChanges && this.lastPublishedCommands.get(sessionState) === signature) return;
+            this.lastPublishedCommands.set(sessionState, signature);
             const session = new ACPSessionConnection(this.connection, sessionState.sessionId);
             await session.update({
                 sessionUpdate: "available_commands_update",
@@ -117,7 +155,14 @@ export class CodexCommands {
         } catch (err) {
             logger.error(`Failed to resolve available commands for session ${sessionState.sessionId}`, err);
         }
-        return this.buildAvailableCommands(skillsEntries);
+        const commands = this.buildAvailableCommands(skillsEntries);
+        if (sessionState.clientCapabilities.airClient) {
+            for (const command of commands) {
+                const action = command._meta?.["commandAction"];
+                if (action) command._meta = withAirMeta(command._meta, AIR_COMMAND_ACTION_KEY, action);
+            }
+        }
+        return commands;
     }
 
     private createSkillsListParams(sessionState: SessionState): SkillsListParams {
@@ -274,7 +319,7 @@ export class CodexCommands {
                     const turnCompleted = await this.runWithProcessCheck(() =>
                         this.codexAcpClient.runCompact(sessionId, (turnId) => {
                             options.onTurnStarted?.(turnId, sessionId);
-                        }),
+                        }, options.onCommandAccepted),
                     );
                     return { handled: true, turnCompleted };
                 } finally {
@@ -380,8 +425,13 @@ export class CodexCommands {
                 sessionState.sessionId,
                 target,
                 (turnId, threadId) => {
+                    const reviewTurnId = sessionState.currentTurnId;
                     this.handleCommandTurnStarted(sessionState, options, turnId, threadId);
+                    sessionState.interruptTurnId = turnId;
+                    sessionState.currentTurnId = reviewTurnId ?? turnId;
                 },
+                options.onCommandAccepted,
+                turnId => {sessionState.currentTurnId = turnId;},
             ));
         } finally {
             options.onNativeCommandFinished?.();
@@ -454,10 +504,10 @@ export class CodexCommands {
         const onTurnStarted = (turnId: string) => {
             this.handleCommandTurnStarted(sessionState, options, turnId, sessionId);
         };
-        return this.createGoalCommandResult(await this.runWithProcessCheck(() =>
+        return this.createGoalCommandResult(sessionState.sessionId, await this.runWithProcessCheck(() =>
             control.action === "set"
-                ? this.codexAcpClient.setGoal(sessionId, control.objective.trim(), onTurnStarted)
-                : this.codexAcpClient.resumeGoal(sessionId, onTurnStarted),
+                ? this.codexAcpClient.setGoal(sessionId, control.objective.trim(), onTurnStarted, undefined, options.onCommandAccepted)
+                : this.codexAcpClient.resumeGoal(sessionId, onTurnStarted, undefined, options.onCommandAccepted),
         ));
     }
 
@@ -474,7 +524,8 @@ export class CodexCommands {
         }
     }
 
-    private createGoalCommandResult(turnCompleted: TurnCompletedNotification | null): CommandHandleResult {
+    private createGoalCommandResult(sessionId: string, turnCompleted: TurnCompletedNotification | null): CommandHandleResult {
+        if (new ACPSessionConnection(this.connection, sessionId).protocolVersion === 2 && turnCompleted === null) return {handled: true};
         return resolveGoalCommandHandleResult(turnCompleted);
     }
 
@@ -686,3 +737,8 @@ export class CodexCommands {
         return count.toString();
     }
 }
+
+export type PromptKind =
+    | { kind: "prompt" }
+    | { kind: "localCommand", name: string }
+    | { kind: "codexTurnCommand", name: string };

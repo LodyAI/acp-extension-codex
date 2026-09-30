@@ -17,6 +17,18 @@
                 "value": true,
                 "resetValue": false,
                 "presentation": "state"
+              },
+              "jetbrains": {
+                "air": {
+                  "version": 1,
+                  "commandAction": {
+                    "kind": "setConfigOption",
+                    "configId": "plan_mode",
+                    "value": true,
+                    "resetValue": false,
+                    "presentation": "state"
+                  }
+                }
               }
             }
           },
@@ -71,6 +83,15 @@
               "commandAction": {
                 "kind": "prefixPrompt",
                 "presentation": "state"
+              },
+              "jetbrains": {
+                "air": {
+                  "version": 1,
+                  "commandAction": {
+                    "kind": "prefixPrompt",
+                    "presentation": "state"
+                  }
+                }
               }
             }
           },

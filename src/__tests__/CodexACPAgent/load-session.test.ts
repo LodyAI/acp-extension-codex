@@ -195,6 +195,10 @@ describe("CodexACPAgent - loadSession", () => {
             if (threadId === "orphan-history") return Promise.reject(new Error("missing child history"));
             return Promise.resolve({thread: threadId === root.id ? root : child});
         });
+        appServer.threadRead = vi.fn().mockImplementation(({threadId}) => {
+            if (threadId === "orphan-history") return Promise.reject(new Error("missing child history"));
+            return Promise.resolve({thread: {...(threadId === root.id ? root : child), historyMode: "legacy"}});
+        });
         appServer.threadBackgroundTerminalsList = vi.fn().mockImplementation(({threadId}) => Promise.resolve({
             data: threadId === "child-history"
                 ? [{itemId: "child-command-1", processId: "42", command: "python -m http.server"}]
@@ -256,6 +260,7 @@ describe("CodexACPAgent - loadSession", () => {
             availabilityNux: null,
             modelSpecialty: null,
             multiAgentVersion: null,
+            availableAccessPrograms: {cyber: []},
             displayName: "GPT-5.2",
             description: "Test model",
             hidden: false,
@@ -373,6 +378,7 @@ describe("CodexACPAgent - loadSession", () => {
                             status: "completed",
                             arguments: {},
                             appContext: null,
+                            mcpAppUi: null,
                             readOnlyHint: null,
                             pluginId: null,
                             result: null,
@@ -489,6 +495,7 @@ describe("CodexACPAgent - loadSession", () => {
             availabilityNux: null,
             modelSpecialty: null,
             multiAgentVersion: null,
+            availableAccessPrograms: {cyber: []},
             displayName: "GPT-5.2",
             description: "Test model",
             hidden: false,
@@ -849,6 +856,7 @@ describe("CodexACPAgent - loadSession", () => {
             availabilityNux: null,
             modelSpecialty: null,
             multiAgentVersion: null,
+            availableAccessPrograms: {cyber: []},
             displayName: "GPT-5.2",
             description: "Test model",
             hidden: false,
@@ -941,7 +949,7 @@ describe("CodexACPAgent - loadSession", () => {
 
         await vi.waitFor(() => {
             const dump = fixture.getAcpConnectionDump([]);
-            expect(dump).toContain('"toolCallId": "mcp_startup.broken-mcp"');
+            expect(dump).toContain('"toolCallId": "mcp_startup.broken-mcp.');
             expect(dump).toContain('MCP server `broken-mcp` failed to start: boom');
         });
     });

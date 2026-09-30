@@ -14,6 +14,12 @@
           "lody": {
             "turnId": "turn-1",
             "messagePhase": "commentary"
+          },
+          "jetbrains": {
+            "air": {
+              "version": 1,
+              "phase": "commentary"
+            }
           }
         }
       }
@@ -36,6 +42,12 @@
           "lody": {
             "turnId": "turn-1",
             "messagePhase": "final_answer"
+          },
+          "jetbrains": {
+            "air": {
+              "version": 1,
+              "phase": "final_answer"
+            }
           }
         }
       }

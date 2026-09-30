@@ -21,7 +21,7 @@ describe("normalized Lody subagent events", () => {
         const router = new CodexSubagentEventRouter("root", true, new ACPSessionConnection(connection, "root"), true);
         const state = createTestSessionState({sessionId: "root", currentModelId: "model", agentMode: AgentMode.DEFAULT_AGENT_MODE});
         state.subagents = router;
-        const handler = new CodexEventHandler(connection, state, true, false, "test-epoch", router);
+        const handler = new CodexEventHandler(connection, state, false, "test-epoch", router);
         const events = () => sent.map(x => x.params).filter(isLodySubagentEvent);
         return {sent, connection, router, handler, events};
     }
@@ -243,7 +243,7 @@ describe("CodexEventHandler - collab agent tool call events", () => {
             .filter(update => update.toolCallId === "call-spawn-weather");
         expect(collaborationUpdates).toMatchObject([
             {sessionUpdate: "tool_call", title: "spawnAgent", status: "in_progress"},
-            {sessionUpdate: "tool_call_update", title: "spawnAgent", status: "completed"},
+            {sessionUpdate: "tool_call_update", status: "completed"},
         ]);
 
         mockFixture.setPermissionResponse({outcome: {outcome: "selected", optionId: "allow_once"}});
@@ -907,7 +907,7 @@ describe("CodexEventHandler - collab agent tool call events", () => {
         expect(updates.map(update => [update.sessionUpdate, update.toolCallId, update.title])).toEqual([
             ["subagent_spawned", undefined, undefined],
             ["tool_call", "send-input", "sendInput"],
-            ["tool_call_update", "send-input", "sendInput"],
+            ["tool_call_update", "send-input", undefined],
             ["subagent_state_update", undefined, undefined],
         ]);
     });
@@ -1660,7 +1660,7 @@ describe("CodexEventHandler - collab agent tool call events", () => {
         expect(nestedSpawn?.args[0].sessionId).toBe("parent-thread:generation:2");
     });
 
-    it("bounds notifications buffered before a child is announced", async () => {
+    it("preserves small notifications within the byte budget before a child is announced", async () => {
         const router = new CodexSubagentEventRouter(
             sessionId,
             true,
@@ -1714,8 +1714,8 @@ describe("CodexEventHandler - collab agent tool call events", () => {
         });
 
         const buffered = router.takeBufferedNotifications();
-        expect(buffered).toHaveLength(256);
-        expect((buffered[0]!.params as {itemId: string}).itemId).toBe("buffered-44");
+        expect(buffered).toHaveLength(300);
+        expect((buffered[0]!.params as {itemId: string}).itemId).toBe("buffered-0");
     });
 
     it("publishes a terminal child state exactly once under concurrent completion", async () => {

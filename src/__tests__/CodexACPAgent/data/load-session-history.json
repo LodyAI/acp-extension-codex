@@ -159,11 +159,6 @@
       "update": {
         "sessionUpdate": "tool_call_update",
         "toolCallId": "item-cmd-1",
-        "status": "completed",
-        "rawOutput": {
-          "formatted_output": "Added.txt\nREADME.md\n",
-          "exit_code": 0
-        },
         "_meta": {
           "terminal_output_delta": {
             "data": "Added.txt\nREADME.md\n",
@@ -187,8 +182,8 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "item-file-1",
-        "title": "Editing files",
         "kind": "edit",
+        "title": "Editing files",
         "status": "completed",
         "content": [
           {
@@ -197,17 +192,7 @@
             "newText": "Hello\nWorld\n",
             "path": "/test/project/Added.txt",
             "_meta": {
-              "kind": "add",
-              "jetbrains": {
-                "air": {
-                  "version": 1,
-                  "diffStats": {
-                    "version": 1,
-                    "added": 2,
-                    "removed": 0
-                  }
-                }
-              }
+              "kind": "add"
             }
           }
         ]
@@ -246,15 +231,24 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "item-dyn-1",
+        "name": "list_apps",
         "kind": "execute",
         "title": "list_apps",
         "status": "completed",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "Done"
+            }
+          }
+        ],
         "rawInput": {
           "arguments": {
             "includeDisabled": false
           }
-        },
-        "name": "list_apps"
+        }
       }
     }
   ]
@@ -267,8 +261,8 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "item-image-view-1",
-        "kind": "read",
         "name": "view_image",
+        "kind": "read",
         "title": "View Image /test/project/input.png",
         "status": "completed",
         "content": [
@@ -303,11 +297,6 @@
         "toolCallId": "item-image-generation-1",
         "kind": "other",
         "title": "Image generation",
-        "_meta": {
-          "lody": {
-            "toolName": "ImageGeneration"
-          }
-        },
         "status": "completed",
         "content": [
           {
@@ -332,6 +321,11 @@
           "revisedPrompt": "A tiny blue square",
           "result": "iVBORw0KGgo=",
           "savedPath": "/test/project/generated-blue-square.png"
+        },
+        "_meta": {
+          "lody": {
+            "toolName": "ImageGeneration"
+          }
         }
       }
     }
@@ -367,33 +361,14 @@
       "sessionId": "session-1",
       "update": {
         "sessionUpdate": "tool_call",
-        "title": "Start subagent test_audit",
-        "kind": "other",
         "toolCallId": "item-subagent-1",
+        "kind": "other",
+        "title": "Start subagent test_audit",
         "status": "completed",
         "rawInput": {
           "agentThreadId": "thread-child-1",
           "agentPath": "/root/test_audit",
           "activityKind": "started"
-        },
-        "_meta": {
-          "lody": {
-            "task": {
-              "version": 1,
-              "taskId": "item-subagent-1",
-              "kind": "subagent",
-              "status": "completed",
-              "description": "Start subagent test_audit",
-              "actor": "test_audit"
-            }
-          },
-          "codex": {
-            "subagent": {
-              "threadId": "thread-child-1",
-              "path": "/root/test_audit",
-              "activity": "started"
-            }
-          }
         }
       }
     }

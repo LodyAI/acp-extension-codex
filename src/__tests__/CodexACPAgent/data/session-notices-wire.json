@@ -1,0 +1,53 @@
+[
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "wire-notices",
+      "update": {
+        "sessionUpdate": "session_info_update",
+        "_meta": {
+          "lody": {
+            "notice": {
+              "level": "warning",
+              "message": "Heads up: Long threads and multiple compactions can cause the model to be less accurate.",
+              "source": "warning"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "wire-notices",
+      "update": {
+        "sessionUpdate": "session_info_update",
+        "_meta": {
+          "lody": {
+            "notice": {
+              "level": "warning",
+              "message": "Unknown key `foo`\n\nin ~/.codex/config.toml",
+              "source": "configWarning"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "wire-notices",
+      "update": {
+        "sessionUpdate": "notice",
+        "severity": "warning",
+        "title": "`--legacy-flag` is deprecated",
+        "description": "Use `--flag` instead."
+      }
+    }
+  }
+]

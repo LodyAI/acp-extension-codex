@@ -1,0 +1,48 @@
+[
+  {
+    "sessionUpdate": {
+      "messageId": "<messageId>",
+      "content": {
+        "text": "/rename New name",
+        "type": "text"
+      },
+      "sessionUpdate": "user_message_chunk"
+    }
+  },
+  {
+    "promptResponse": {
+      "messageId": "<messageId>"
+    }
+  },
+  {
+    "sessionUpdate": {
+      "state": "running",
+      "sessionUpdate": "state_update"
+    }
+  },
+  {
+    "sessionUpdate": {
+      "_meta": {
+        "codex": {
+          "error": {
+            "message": "The '/rename' command failed: thread name could not be saved"
+          }
+        }
+      },
+      "sessionUpdate": "session_info_update"
+    }
+  },
+  {
+    "sessionUpdate": {
+      "stopReason": "end_turn",
+      "_meta": {
+        "quota": {
+          "token_count": null,
+          "model_usage": []
+        }
+      },
+      "state": "idle",
+      "sessionUpdate": "state_update"
+    }
+  }
+]

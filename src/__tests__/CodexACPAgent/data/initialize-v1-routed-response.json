@@ -1,0 +1,129 @@
+{
+  "protocolVersion": 1,
+  "agentInfo": {
+    "name": "acp-extension-codex",
+    "title": "Codex",
+    "version": "<version>"
+  },
+  "agentCapabilities": {
+    "auth": {
+      "logout": {}
+    },
+    "providers": {},
+    "loadSession": true,
+    "promptCapabilities": {
+      "embeddedContext": true,
+      "image": true
+    },
+    "sessionCapabilities": {
+      "resume": {},
+      "list": {},
+      "close": {},
+      "delete": {},
+      "fork": {},
+      "additionalDirectories": {},
+      "subagents": {}
+    },
+    "mcpCapabilities": {
+      "acp": false,
+      "http": true,
+      "sse": false
+    },
+    "_meta": {
+      "lody": {
+        "subagentEvents": {
+          "version": 1
+        },
+        "sessionTitle": {
+          "version": 1
+        },
+        "usage": {
+          "version": 1
+        },
+        "rateLimits": {
+          "version": 1,
+          "query": true
+        },
+        "forkAtTurn": {
+          "version": 1
+        },
+        "steering": {
+          "version": 1,
+          "transport": "request",
+          "upstreamTurn": "same",
+          "configPolicy": "active"
+        },
+        "tasks": {
+          "version": 1,
+          "background": true
+        },
+        "subagents": {
+          "version": 1,
+          "lifecycle": true
+        },
+        "goal": {
+          "version": 1,
+          "actions": [
+            "set",
+            "pause",
+            "resume",
+            "clear"
+          ],
+          "controlActions": [
+            "pause",
+            "clear"
+          ],
+          "promptActions": [
+            "set",
+            "pause",
+            "resume",
+            "clear"
+          ]
+        },
+        "compaction": {
+          "version": 1
+        },
+        "sessionHistory": {
+          "version": 1
+        },
+        "worktreeProject": {
+          "version": 1
+        }
+      },
+      "authStatus": {}
+    }
+  },
+  "authMethods": [
+    {
+      "id": "api-key",
+      "name": "API Key",
+      "description": "Use an API key to authenticate",
+      "_meta": {
+        "api-key": {
+          "provider": "openai"
+        }
+      }
+    },
+    {
+      "id": "chat-gpt",
+      "name": "ChatGPT",
+      "description": "Use ChatGPT to authenticate"
+    },
+    {
+      "id": "gateway",
+      "name": "Custom model gateway",
+      "description": "Use a custom gateway to authenticate and access models",
+      "_meta": {
+        "gateway": {
+          "protocol": "openai",
+          "restartRequired": "false"
+        }
+      }
+    }
+  ],
+  "_meta": {
+    "steering": {
+      "supported": true
+    }
+  }
+}

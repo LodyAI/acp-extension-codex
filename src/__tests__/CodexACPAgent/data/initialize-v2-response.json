@@ -1,0 +1,155 @@
+{
+  "protocolVersion": 2,
+  "info": {
+    "name": "acp-extension-codex",
+    "title": "Codex",
+    "version": "<version>"
+  },
+  "capabilities": {
+    "session": {
+      "prompt": {
+        "image": {},
+        "embeddedContext": {}
+      },
+      "mcp": {
+        "stdio": {},
+        "http": {}
+      },
+      "delete": {},
+      "additionalDirectories": {},
+      "fork": {}
+    },
+    "auth": {
+      "_meta": {
+        "authStatus": {}
+      }
+    },
+    "providers": {},
+    "_meta": {
+      "lody": {
+        "subagentEvents": {
+          "version": 1
+        },
+        "sessionTitle": {
+          "version": 1
+        },
+        "usage": {
+          "version": 1
+        },
+        "rateLimits": {
+          "version": 1,
+          "query": true
+        },
+        "forkAtTurn": {
+          "version": 1
+        },
+        "steering": {
+          "version": 1,
+          "transport": "request",
+          "upstreamTurn": "same",
+          "configPolicy": "active"
+        },
+        "tasks": {
+          "version": 1,
+          "background": true
+        },
+        "subagents": {
+          "version": 1,
+          "lifecycle": true
+        },
+        "goal": {
+          "version": 1,
+          "actions": [
+            "set",
+            "pause",
+            "resume",
+            "clear"
+          ],
+          "controlActions": [
+            "pause",
+            "clear"
+          ],
+          "promptActions": [
+            "set",
+            "pause",
+            "resume",
+            "clear"
+          ]
+        },
+        "compaction": {
+          "version": 1
+        },
+        "sessionHistory": {
+          "version": 1
+        },
+        "worktreeProject": {
+          "version": 1
+        }
+      }
+    }
+  },
+  "authMethods": [
+    {
+      "methodId": "api-key",
+      "name": "API Key",
+      "description": "Use an API key to authenticate",
+      "_meta": {
+        "api-key": {
+          "provider": "openai"
+        }
+      },
+      "type": "agent"
+    },
+    {
+      "methodId": "chat-gpt",
+      "name": "ChatGPT",
+      "description": "Use ChatGPT to authenticate",
+      "type": "agent"
+    },
+    {
+      "methodId": "chat-gpt-device-code",
+      "name": "ChatGPT (device code)",
+      "description": "Sign in to ChatGPT by opening a verification page and entering a one-time code",
+      "type": "agent"
+    },
+    {
+      "methodId": "gateway",
+      "name": "Custom model gateway",
+      "description": "Use a custom gateway to authenticate and access models",
+      "_meta": {
+        "gateway": {
+          "protocol": "openai",
+          "restartRequired": "false"
+        }
+      },
+      "type": "agent"
+    }
+  ],
+  "_meta": {
+    "steering": {
+      "supported": true
+    },
+    "jetbrains": {
+      "air": {
+        "version": 1,
+        "goal": {
+          "version": 1,
+          "controlMethod": "_lody/session/goal",
+          "actions": [
+            "set",
+            "pause",
+            "resume",
+            "clear"
+          ]
+        },
+        "capabilities": [
+          "sessionFailure",
+          "agentFileChangeReport",
+          "nativeSubagentSessions",
+          "asyncTasks",
+          "recommendedValue"
+        ]
+      }
+    }
+  }
+}

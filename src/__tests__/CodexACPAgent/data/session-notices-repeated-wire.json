@@ -1,0 +1,78 @@
+[
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "wire-repeated-notice",
+      "update": {
+        "sessionUpdate": "session_info_update",
+        "_meta": {
+          "lody": {
+            "notice": {
+              "level": "warning",
+              "message": "Repeated warning",
+              "source": "warning"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "wire-repeated-notice",
+      "update": {
+        "sessionUpdate": "session_info_update",
+        "_meta": {
+          "lody": {
+            "notice": {
+              "level": "warning",
+              "message": "Repeated warning",
+              "source": "warning"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "wire-repeated-notice",
+      "update": {
+        "sessionUpdate": "session_info_update",
+        "_meta": {
+          "lody": {
+            "notice": {
+              "level": "warning",
+              "message": "Different warning",
+              "source": "warning"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "wire-repeated-notice",
+      "update": {
+        "sessionUpdate": "session_info_update",
+        "_meta": {
+          "lody": {
+            "notice": {
+              "level": "warning",
+              "message": "Repeated warning",
+              "source": "warning"
+            }
+          }
+        }
+      }
+    }
+  }
+]

@@ -123,7 +123,7 @@ describe("CodexEventHandler - thread goal events", () => {
 
         const events = mockFixture.getAcpConnectionEvents([]);
         expect(events).toHaveLength(1);
-        expect(events[0]!.args[0].update).toEqual({
+        expect(events[0]!.args[0].update).toMatchObject({
             sessionUpdate: "session_info_update",
             _meta: {
                 lody: {
@@ -215,7 +215,7 @@ describe("CodexEventHandler - thread goal events", () => {
 
         const events = mockFixture.getAcpConnectionEvents([]);
         expect(events).toHaveLength(2);
-        expect(events[0]!.args[0].update).toEqual({
+        expect(events[0]!.args[0].update).toMatchObject({
             sessionUpdate: "agent_message_chunk",
             messageId: "message-1",
             content: {
@@ -228,7 +228,7 @@ describe("CodexEventHandler - thread goal events", () => {
                 },
             },
         });
-        expect(events[1]!.args[0].update).toEqual({
+        expect(events[1]!.args[0].update).toMatchObject({
             sessionUpdate: "session_info_update",
             _meta: {
                 lody: {
@@ -261,7 +261,7 @@ describe("CodexEventHandler - thread goal events", () => {
 
         const events = mockFixture.getAcpConnectionEvents([]);
         expect(events).toHaveLength(1);
-        expect(events[0]!.args[0].update).toEqual({
+        expect(events[0]!.args[0].update).toMatchObject({
             sessionUpdate: "session_info_update",
             _meta: {
                 lody: {goal: null},

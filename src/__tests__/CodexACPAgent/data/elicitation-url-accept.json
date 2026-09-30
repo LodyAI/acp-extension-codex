@@ -8,6 +8,11 @@
         "kind": "fetch",
         "status": "pending",
         "title": "MCP server requests to open a URL",
+        "rawInput": {
+          "serverName": "auth-server",
+          "description": "Please authorize access to your GitHub account",
+          "url": "https://example.com/authorize?id=elicit-789"
+        },
         "content": [
           {
             "type": "content",
@@ -16,12 +21,7 @@
               "text": "Please authorize access to your GitHub account"
             }
           }
-        ],
-        "rawInput": {
-          "serverName": "auth-server",
-          "description": "Please authorize access to your GitHub account",
-          "url": "https://example.com/authorize?id=elicit-789"
-        }
+        ]
       },
       "options": [
         {
@@ -55,16 +55,6 @@
         "sessionUpdate": "tool_call_update",
         "toolCallId": "elicitation-elicit-789",
         "status": "completed",
-        "title": "MCP server requests to open a URL",
-        "content": [
-          {
-            "type": "content",
-            "content": {
-              "type": "text",
-              "text": "Please authorize access to your GitHub account"
-            }
-          }
-        ],
         "rawOutput": {
           "action": "accept"
         }

@@ -1,8 +1,5 @@
 # Permission presentation extension
 
-For a user-facing summary of behavior changes, see
-[`permission-changes.ru.md`](permission-changes.ru.md).
-
 This document defines the provider-neutral permission presentation implemented by `codex-acp`. Permission decisions use the standard ACP `session/request_permission` method. The optional `_meta.permission` extension adds display text only; it never changes which actions a client may approve.
 
 ## Protocol contract

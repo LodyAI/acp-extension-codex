@@ -13,6 +13,12 @@
         "_meta": {
           "lody": {
             "messagePhase": "final_answer"
+          },
+          "jetbrains": {
+            "air": {
+              "version": 1,
+              "phase": "final_answer"
+            }
           }
         }
       }

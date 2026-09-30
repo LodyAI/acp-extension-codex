@@ -1,0 +1,42 @@
+{
+  "updates": [
+    {
+      "sessionUpdate": "agent_message_chunk",
+      "messageId": "next-message",
+      "content": {
+        "type": "text",
+        "text": "Hi."
+      },
+      "_meta": {
+        "lody": {
+          "turnId": "next-turn"
+        }
+      }
+    }
+  ],
+  "response": {
+    "stopReason": "end_turn",
+    "usage": null,
+    "_meta": {
+      "quota": {
+        "token_count": null,
+        "model_usage": []
+      },
+      "jetbrains": {
+        "air": {
+          "version": 1,
+          "sessionFailure": {
+            "id": "next-turn:error",
+            "revision": 1,
+            "category": "service",
+            "severity": "error",
+            "title": "/test/cwd is not a git repository",
+            "actions": [
+              "retry"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

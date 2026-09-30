@@ -1,0 +1,40 @@
+[
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "wire-legacy-notices",
+      "update": {
+        "sessionUpdate": "session_info_update",
+        "_meta": {
+          "lody": {
+            "notice": {
+              "level": "warning",
+              "message": "Legacy warning",
+              "source": "warning"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "wire-legacy-notices",
+      "update": {
+        "sessionUpdate": "session_info_update",
+        "_meta": {
+          "lody": {
+            "notice": {
+              "level": "warning",
+              "message": "Legacy configuration warning\n\nConfiguration details",
+              "source": "configWarning"
+            }
+          }
+        }
+      }
+    }
+  }
+]

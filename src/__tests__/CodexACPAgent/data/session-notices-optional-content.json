@@ -1,0 +1,107 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "notice-session",
+      "update": {
+        "sessionUpdate": "session_info_update",
+        "_meta": {
+          "lody": {
+            "notice": {
+              "level": "warning",
+              "message": " \n ",
+              "source": "warning"
+            }
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "notice-session",
+      "update": {
+        "sessionUpdate": "session_info_update",
+        "_meta": {
+          "lody": {
+            "notice": {
+              "level": "warning",
+              "message": " \t ",
+              "source": "configWarning"
+            }
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "notice-session",
+      "update": {
+        "sessionUpdate": "notice",
+        "severity": "warning",
+        "title": "Deprecated configuration"
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "notice-session",
+      "update": {
+        "sessionUpdate": "session_info_update",
+        "_meta": {
+          "lody": {
+            "notice": {
+              "level": "warning",
+              "message": "Default configuration",
+              "source": "configWarning"
+            }
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "notice-session",
+      "update": {
+        "sessionUpdate": "notice",
+        "severity": "warning",
+        "title": "Old configuration",
+        "description": ""
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "notice-session",
+      "update": {
+        "sessionUpdate": "session_info_update",
+        "_meta": {
+          "lody": {
+            "notice": {
+              "level": "warning",
+              "message": "  Global warning  ",
+              "source": "warning"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

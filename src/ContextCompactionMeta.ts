@@ -38,3 +38,8 @@ export function createContextCompactionMeta(
         },
     };
 }
+
+export const CONTEXT_COMPACTION_META_VERSION = 1;
+export function createContextCompactionMetadata(metadata: ContextCompactionMetadata = {}): ContextCompactionMetadata & {version: number} {
+    return {version: CONTEXT_COMPACTION_META_VERSION, ...metadata};
+}
