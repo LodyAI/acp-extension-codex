@@ -21,6 +21,8 @@ import type {
     LoginAccountParams,
     LoginAccountResponse,
     LogoutAccountResponse,
+    McpResourceReadParams,
+    McpResourceReadResponse,
     McpServerElicitationRequestParams,
     McpServerElicitationRequestResponse,
     McpServerOauthLoginParams,
@@ -29,6 +31,8 @@ import type {
     McpServerStartupFailureReason,
     McpServerStartupState,
     McpServerStatusUpdatedNotification,
+    McpServerToolCallParams,
+    McpServerToolCallResponse,
     ModelListParams,
     ModelListResponse,
     ReviewStartParams,
@@ -881,6 +885,14 @@ export class CodexAppServerClient {
 
     async listMcpServerStatus(params: ListMcpServerStatusParams): Promise<ListMcpServerStatusResponse> {
         return await this.sendRequest({ method: "mcpServerStatus/list", params });
+    }
+
+    async mcpResourceRead(params: McpResourceReadParams): Promise<McpResourceReadResponse> {
+        return await this.sendRequest({ method: "mcpServer/resource/read", params });
+    }
+
+    async mcpServerToolCall(params: McpServerToolCallParams): Promise<McpServerToolCallResponse> {
+        return await this.sendRequest({ method: "mcpServer/tool/call", params });
     }
 
     async mcpServerOauthLogin(params: McpServerOauthLoginParams): Promise<McpServerOauthLoginResponse> {

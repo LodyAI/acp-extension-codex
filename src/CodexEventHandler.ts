@@ -956,7 +956,10 @@ export class CodexEventHandler {
             case "commandExecution":
                 return this.renderer.render(this.commands.started(event.item));
             case "mcpToolCall":
-                return this.renderer.render(McpToolReporter.started(event.item));
+                return this.renderer.render(McpToolReporter.started(
+                    event.item,
+                    this.sessionState.mcpApps?.track(event.threadId, event.item) ?? null,
+                ));
             case "dynamicToolCall":
                 return this.renderer.render(DynamicToolReporter.started(event.item));
             case "webSearch":
@@ -1000,6 +1003,7 @@ export class CodexEventHandler {
             case "dynamicToolCall":
                 return this.renderer.render(DynamicToolReporter.completed(event.item));
             case "mcpToolCall":
+                this.sessionState.mcpApps?.track(event.threadId, event.item);
                 return this.renderer.render(McpToolReporter.completed(event.item));
             case "commandExecution":
                 return this.renderer.render(this.commands.completed(event.item, true));
