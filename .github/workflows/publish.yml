@@ -1,24 +1,83 @@
-name: Release
+name: Publish and Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Existing stable release tag to retry (vX.Y.Z)
+        required: true
+        type: string
 
 permissions: {}
 
+concurrency:
+  group: npm-release
+  cancel-in-progress: false
+
 jobs:
-  verify:
+  release-please:
+    if: github.repository == 'LodyAI/acp-extension-codex' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    environment: release # Optional: for enhanced security
+    environment: release
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    outputs:
+      sha: ${{ steps.target.outputs.sha }}
+    steps:
+      - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4
+        if: github.event_name == 'push'
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        if: steps.release.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch'
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Resolve and validate the released commit
+        if: steps.release.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch'
+        id: target
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag_name || inputs.ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          gh release view "$RELEASE_TAG" --json isDraft,isPrerelease --jq '(.isDraft == false) and (.isPrerelease == false)' | grep -qx true
+          sha=$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")
+          git merge-base --is-ancestor "$sha" origin/main
+          git show "$sha:package.json" > "$RUNNER_TEMP/release-package.json"
+          node -e 'const p = require(process.env.RUNNER_TEMP + "/release-package.json"); if (p.name !== "acp-extension-codex" || "v" + p.version !== process.env.RELEASE_TAG || p.private) process.exit(1)'
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+  publish-npm:
+    needs: release-please
+    if: needs.release-please.outputs.sha != ''
+    runs-on: ubuntu-latest
+    environment: release
     permissions:
       contents: read
+      id-token: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          node-version: '24'
-      - name: Configure sandboxing
+          ref: ${{ needs.release-please.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Install npm with trusted publishing support
+        run: npm install --global npm@11
+      - name: Configure sandboxing for tests
         run: |
           sudo apt-get update
           sudo apt-get install --yes bubblewrap
@@ -31,44 +90,10 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npm pack --dry-run
-
-  publish-to-npm:
-    needs: verify
-    runs-on: ubuntu-latest
-    environment: release # Optional: for enhanced security
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: '24'
-          registry-url: 'https://registry.npmjs.org'
-      - run: npm ci
-      - run: npm publish --access public
-
-  create-release:
-    needs: publish-to-npm
-    runs-on: ubuntu-latest
-    environment: release
-    permissions: {}
-    steps:
-      - name: Generate GitHub token
-        uses: actions/create-github-app-token@v3
-        id: generate-token
-        with:
-          app-id: ${{ secrets.RELEASE_PLZ_APP_ID }}
-          private-key: ${{ secrets.RELEASE_PLZ_APP_PRIVATE_KEY }}
-
-      - name: Create Release
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
-        with:
-          token: ${{ steps.generate-token.outputs.token }}
-          generate_release_notes: true
+      - run: npm publish --access public --provenance
 
   trigger-registry-update:
-    needs: create-release
+    needs: publish-npm
     runs-on: ubuntu-latest
     environment: release
     permissions: {}
