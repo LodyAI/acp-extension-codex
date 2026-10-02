@@ -1,4 +1,5 @@
 import type * as acp from "@agentclientprotocol/sdk";
+import type {LodyMcpAppToolCallMeta} from "acp-extension-core";
 import type {ContextCompactionMetadata} from "../ContextCompactionMeta";
 
 /**
@@ -42,6 +43,8 @@ export type ToolFacts = {
     /** The command ended. */
     terminalExit?: {exitCode: number | null};
     mcp?: boolean;
+    /** The MCP App the tool call opens, for a client that negotiated `_meta.lody.mcpApps`. */
+    mcpApp?: LodyMcpAppToolCallMeta;
     subagent?: boolean;
     contextCompaction?: ContextCompactionMetadata;
     /** The fields of a client that is not AIR, where they differ from the fields above. */
