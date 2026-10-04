@@ -894,6 +894,26 @@ export class CodexAcpServer {
         if (e.message.includes("load config")) {
             throw RequestError.internalError(`${e.message}\n\nCheck ${configPath} and project .codex directories, especially their config.toml files, or any CODEX_CONFIG override.`);
         }
+        this.throwWorkspaceRoutingError(e);
+    }
+
+    /**
+     * The app-server reports workspace routing discovery failures as internal
+     * errors while opening a session. Only the two observed texts are matched:
+     * they are reachability problems, so preserve the original message and add
+     * a network hint. They carry no authentication evidence and never map to
+     * `authRequired` or a forced logout.
+     */
+    private throwWorkspaceRoutingError(error: unknown): void {
+        if (!(error instanceof Error)) {
+            return;
+        }
+        if (!error.message.includes("workspace routing discovery failed")
+            && !error.message.includes("workspace routing discovery timed out")) {
+            return;
+        }
+        const message = `${error.message}\n\nCheck the network connection and any proxy or VPN settings, then try again.`;
+        throw RequestError.internalError({kind: "codex_workspace_routing", message}, message);
     }
 
     private beginSessionOpen(sessionId: string): number {
@@ -1497,6 +1517,7 @@ export class CodexAcpServer {
             availableCommands,
         } = await this.getOrCreateSessionWithHistory(params).catch((error: unknown) => {
             this.handleManagedChatgptRefreshError(error);
+            this.throwWorkspaceRoutingError(error);
             throw error;
         });
 
