@@ -109,8 +109,11 @@
         "availableCommands": [
           {
             "name": "plan",
-            "description": "Turn plan mode on.",
-            "input": null,
+            "description": "Turn plan mode on and optionally send a prompt.",
+            "input": {
+              "hint": "prompt (optional)",
+              "type": "text"
+            },
             "_meta": {
               "commandAction": {
                 "kind": "setConfigOption",

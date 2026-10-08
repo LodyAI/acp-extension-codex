@@ -1,6 +1,6 @@
 import {describe, expect, it, vi} from "vitest";
 import * as acp from "@agentclientprotocol/sdk";
-import {createCodexMockTestFixture, createTestModel} from "../acp-test-utils";
+import {createCodexMockTestFixture, createTestModel, mockPromptTurn} from "../acp-test-utils";
 import {AgentMode, MODE_CONFIG_ID} from "../../AgentMode";
 import {
     MODEL_CONFIG_ID,
@@ -293,6 +293,40 @@ describe("Session config options", () => {
                 }),
             })],
         }));
+    });
+
+    it.each(["default", "plan"] as const)("submits /plan text and attachments in plan mode from %s", async (initialMode) => {
+        const {fast} = buildModels();
+        const {fixture, codexAcpAgent, codexAcpClient} = await createSession("fast-model[medium]", [fast]);
+        const state = codexAcpAgent.getSessionState("session-id");
+        state.collaborationMode = initialMode;
+        const originalAgentMode = state.agentMode;
+        let nativeMode: unknown;
+        vi.spyOn((codexAcpClient as any).codexClient, "threadSettingsUpdate").mockImplementation(async (params: any) => {
+            nativeMode = params.collaborationMode.mode;
+        });
+        const turn = mockPromptTurn(fixture, "session-id");
+        const response = await codexAcpAgent.prompt({
+            sessionId: "session-id",
+            prompt: [
+                {type: "text", text: `${initialMode === "plan" ? "/ plan" : "  /PLAN"}\nPlan the migration\nKeep data safe.  `},
+                {type: "text", text: "Additional context"},
+                {type: "image", mimeType: "image/png", data: "aGVsbG8="},
+            ],
+        });
+        expect(response.stopReason).toBe("end_turn");
+        expect(state.collaborationMode).toBe("plan");
+        expect(nativeMode).toBe("plan");
+        expect(state.agentMode).toBe(originalAgentMode);
+        expect(turn.mock.calls.map(([params]) => params)).toEqual([
+            expect.objectContaining({
+                input: [
+                    expect.objectContaining({type: "text", text: "Plan the migration\nKeep data safe.  "}),
+                    expect.objectContaining({type: "text", text: "Additional context"}),
+                    expect.objectContaining({type: "image", url: "data:image/png;base64,aGVsbG8="}),
+                ],
+            }),
+        ]);
     });
 
     it("changes the model and keeps the current reasoning effort when supported", async () => {

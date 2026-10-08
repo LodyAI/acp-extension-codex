@@ -133,7 +133,7 @@ npm run package:all
 
 ## Plan configuration
 
-Codex translates Core’s boolean `plan_mode` option to its native default/plan collaboration state. Approval and sandbox settings are retained. The `/plan` command uses the same boolean configuration path.
+Codex translates Core’s boolean `plan_mode` option to its native default/plan collaboration state. Approval and sandbox settings are retained. The `/plan` command uses the same boolean configuration path. A standalone `/plan` toggles the mode without starting a turn. `/plan <prompt>` enables plan mode (including when already enabled), removes only the command prefix, and submits the remaining text and attachments through the normal prompt lifecycle. A following content block also counts as a prompt. ACP v2 acknowledges these requests only after native user-message insertion; configuration failures do not submit the prompt.
 
 ## Steering delivery reconciliation
 
