@@ -91,6 +91,9 @@ export class CodexCommands {
         if (command === null || command.name.startsWith("$")) return {kind: "prompt"};
         switch (command.name) {
             case "plan":
+                return this.planPrompt(prompt) === null
+                    ? {kind: "localCommand", name: command.name}
+                    : {kind: "prompt"};
             case "status":
             case "rename":
             case "logout":
@@ -201,8 +204,8 @@ export class CodexCommands {
         return [
             {
                 name: "plan",
-                description: "Turn plan mode on.",
-                input: null,
+                description: "Turn plan mode on and optionally send a prompt.",
+                input: {hint: "prompt (optional)"},
                 _meta: {
                     commandAction: {
                         kind: "setConfigOption",
@@ -291,6 +294,15 @@ export class CodexCommands {
         };
     }
 
+    /** Remove only the command prefix; preserve text metadata and all following blocks. */
+    private planPrompt(prompt: acp.ContentBlock[]): acp.ContentBlock[] | null {
+        const first = prompt[0];
+        if (!first || first.type !== "text") return null;
+        const text = first.text.replace(/^\s*\/\s*plan(?:\s+|$)/i, "");
+        const body = [...(text.trim() ? [{...first, text}] : []), ...prompt.slice(1)];
+        return body.some(block => block.type !== "text" || block.text.trim().length > 0) ? body : null;
+    }
+
     async tryHandleCommand(
         prompt: acp.ContentBlock[],
         sessionState: SessionState,
@@ -304,13 +316,13 @@ export class CodexCommands {
         const sessionId = sessionState.sessionId;
         switch (commandName) {
             case "plan": {
-                if (command.rest.length > 0) {
-                    await this.sendCommandUsageMessage(commandName, "no arguments", sessionId);
-                    return { handled: true };
-                }
-                const mode = sessionState.collaborationMode !== PLAN_COLLABORATION_MODE;
-                await options.setConfigOption?.(LODY_PLAN_MODE_CONFIG_ID, mode);
-                return { handled: options.setConfigOption !== undefined };
+                if (!options.setConfigOption) return {handled: false};
+                const planPrompt = this.planPrompt(prompt);
+                // A request always enables planning, even when already in plan mode.
+                // Only the standalone command retains the existing toggle behavior.
+                const mode = planPrompt !== null || sessionState.collaborationMode !== PLAN_COLLABORATION_MODE;
+                await options.setConfigOption(LODY_PLAN_MODE_CONFIG_ID, mode);
+                return planPrompt === null ? {handled: true} : {handled: false, prompt: planPrompt};
             }
             case "compact": {
                 options.onTurnStartPending?.();

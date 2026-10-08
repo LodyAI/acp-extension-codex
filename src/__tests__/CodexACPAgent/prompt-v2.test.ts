@@ -126,6 +126,56 @@ describe('session/prompt over ACP v2', () => {
         await expect(dump(client.transcript, messageId)).toMatchFileSnapshot('data/prompt-v2-inserted.json');
     });
 
+    it.each([false, true])('waits for native insertion for /plan with a separate body (attachment=%s)', async (attachment) => {
+        const client = await connectSession();
+        closeClient = () => client.connection.close();
+        let markStarted!: () => void;
+        const started = new Promise<void>(resolve => { markStarted = resolve; });
+        client.setCodexResponse("thread/settings/update", async (params) => {
+            client.transcript.push({codexRequest: "thread/settings/update", params});
+            return {};
+        });
+        client.setTurnStart(async () => {
+            markStarted();
+            return {turn: createTurn("inProgress")};
+        });
+        const body = attachment
+            ? {type: "image" as const, mimeType: "image/png", data: "aGVsbG8="}
+            : {type: "text" as const, text: "Plan a safe migration"};
+        const response = client.sendPrompt([{type: "text", text: "/plan"}, body]);
+        await started;
+        expect(client.transcript.some(entry => "promptResponse" in entry)).toBe(false);
+        expect(client.turnStartParams).toEqual([expect.objectContaining({
+            input: [expect.objectContaining(attachment
+                ? {type: "image", url: "data:image/png;base64,aGVsbG8="}
+                : {type: "text", text: "Plan a safe migration"})],
+        })]);
+        const settingsIndex = indexOf(client.transcript, entry => "codexRequest" in entry && entry.codexRequest === "thread/settings/update");
+        expect(client.transcript[settingsIndex]).toMatchObject({params: {collaborationMode: {mode: "plan"}}});
+        expect(settingsIndex).toBeLessThan(indexOf(client.transcript, entry => "codexRequest" in entry && entry.codexRequest === "turn/start"));
+        const clientId = client.turnStartParams[0]!["clientUserMessageId"] as string;
+        client.emit(turnStarted());
+        client.emit(itemCompleted(userMessageItem(clientId)));
+        expect((await response).messageId).toBe(clientId);
+        client.emit(turnCompleted());
+        await client.promptRunFinished();
+        expect(client.agent.getSessionState(sessionId).collaborationMode).toBe("plan");
+    });
+
+    it('rejects /plan before insertion when enabling plan mode fails', async () => {
+        const client = await connectSession();
+        closeClient = () => client.connection.close();
+        client.setCodexResponse("thread/settings/update", async () => {
+            throw new Error("Cannot enable planning");
+        });
+        await expect(client.sendPrompt([{type: "text", text: "/plan Plan a migration"}]))
+            .rejects.toMatchObject({code: -32603});
+        await client.promptRunFinished();
+        expect(client.turnStartParams).toEqual([]);
+        expect(client.transcript.some(entry => "promptResponse" in entry)).toBe(false);
+        expect(client.agent.getSessionState(sessionId).collaborationMode).toBe("default");
+    });
+
     it('ends a turn that fails or is interrupted after insertion with one idle and the v1 stop reason', async () => {
         const client = await connectSession();
         closeClient = () => client.connection.close();

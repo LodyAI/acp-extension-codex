@@ -38,6 +38,10 @@
 
 ## Docs
 
+- `/plan` with text or attachments enables planning and follows the normal prompt insertion
+  and cancellation lifecycle. Preserve every content block after removing the command prefix;
+  only a standalone `/plan` is a local mode toggle.
+
 - Usage reports assign native root-thread counter increments to the model frozen
   from the submitted turn parameters, not the UI model at notification time.
   Each native turn is a separate accounting lifetime: notification-local
