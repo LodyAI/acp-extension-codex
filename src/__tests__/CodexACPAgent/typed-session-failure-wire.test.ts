@@ -1,5 +1,6 @@
 import {describe, expect, it, vi} from "vitest";
 import * as acp from "@agentclientprotocol/sdk";
+import {ResponseError} from "vscode-jsonrpc/node";
 import {CodexAppServerClient} from "../../CodexAppServerClient";
 import {CodexAcpClient} from "../../CodexAcpClient";
 import {CodexAcpServer} from "../../CodexAcpServer";
@@ -99,6 +100,26 @@ describe("typed session failures over ACP transport", () => {
             prompt: [{type: "text", text: "keep legacy rejection"}],
         })).rejects.toThrow("Codex process has exited with code 1:\nlegacy process stderr");
         expect(fixture.updates).toEqual([]);
+    });
+
+    it("delivers workspace routing text and a network hint instead of a bare Internal error", async () => {
+        const fixture = createWireFixture();
+        await fixture.initialize();
+        vi.spyOn(fixture.codexClient, "authRequired").mockResolvedValue(false);
+        vi.spyOn(fixture.appServer, "threadStart").mockRejectedValue(
+            new ResponseError(-32603, "workspace routing discovery timed out"),
+        );
+
+        const failure = await fixture.client.newSession({cwd: "/workspace", mcpServers: []})
+            .then(() => undefined, (reason: unknown) => reason) as
+            {code?: number; message?: string; data?: {kind?: string; message?: string}};
+
+        expect(failure).toMatchObject({code: -32603});
+        expect(failure.code).not.toBe(-32000);
+        expect(failure.message).toContain("workspace routing discovery timed out");
+        expect(failure.message).toMatch(/network|proxy/i);
+        expect(failure.data).toMatchObject({kind: "codex_workspace_routing"});
+        expect(JSON.stringify(failure)).not.toContain("secret process stderr");
     });
 
     it("delivers an idle terminal error as a decoded session update", async () => {

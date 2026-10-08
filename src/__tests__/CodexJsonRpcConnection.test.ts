@@ -14,6 +14,17 @@ vi.mock('node:child_process', async importOriginal => {
 const roots: string[] = [];
 const children: ChildProcessWithoutNullStreams[] = [];
 const fixture = "require('node:readline').createInterface({input:process.stdin}).on('line', line => {const request=JSON.parse(line);process.stdout.write(JSON.stringify({id:request.id,result:{args:process.argv.slice(1),home:process.env.CODEX_HOME,token:process.env.LODY_CODEX_PROCESS_TOKEN??null}})+'\\n');});";
+const stderrFixture = "process.stderr.write('app-server diagnostic line\\n');" + "require('node:readline').createInterface({input:process.stdin}).on('line', line => {const request=JSON.parse(line);process.stdout.write(JSON.stringify({id:request.id,result:{echo:request.method}})+'\\n');});";
+
+async function spawnStderrFixture(spawnFn: typeof spawn) {
+    const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+    vi.mocked(spawnFn).mockImplementation(((command: string, argsOrOptions: string[] | SpawnOptions, options?: SpawnOptions) => {
+        const opts = (Array.isArray(argsOrOptions) ? options : argsOrOptions)!;
+        const child = actual.spawn(process.execPath, ['-e', stderrFixture], {...opts, shell: false, stdio: 'pipe'}) as ChildProcessWithoutNullStreams;
+        children.push(child);
+        return child;
+    }) as typeof spawn);
+}
 
 async function processFixture(platform?: 'win32') {
     const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
@@ -42,6 +53,7 @@ describe('startCodexConnection', () => {
             const exited = once(child, 'exit'); child.kill(); await exited;
         }
         vi.restoreAllMocks();
+        vi.unstubAllEnvs();
         await Promise.all(roots.splice(0).map(root => rm(root, {recursive: true, force: true})));
     });
 
@@ -75,6 +87,45 @@ describe('startCodexConnection', () => {
         const native = startCodexConnection('C:\\Program Files\\Codex\\codex.cmd', env);
         expect(await native.connection.sendRequest('probe')).toEqual({args: [], home: env.CODEX_HOME, token: null});
         expect(test.observed()).toEqual({command: '"C:\\Program Files\\Codex\\codex.cmd" app-server', args: [], shell: true, windowsHide: true});
+    });
+
+    it('forwards live app-server stderr to the adapter stderr while stdout stays protocol-only', async () => {
+        await spawnStderrFixture(spawn);
+        const forwarded: string[] = [];
+        vi.spyOn(process.stderr, 'write').mockImplementation(((chunk: unknown) => {
+            forwarded.push(String(chunk));
+            return true;
+        }) as typeof process.stderr.write);
+
+        const started = startCodexConnection('/synthetic/codex', {});
+        await once(started.process.stderr, 'data');
+
+        expect(forwarded.join('')).toContain('app-server diagnostic line');
+        // stderr forwarding must not leak into the JSON-RPC stdout stream.
+        expect(await started.connection.sendRequest('probe')).toEqual({echo: 'probe'});
+    });
+
+    it('keeps the optional APP_SERVER_LOGS file copy alongside stderr forwarding', async () => {
+        const logDir = await mkdtemp(path.join(tmpdir(), 'codex-app-server-logs-'));
+        roots.push(logDir);
+        vi.stubEnv('APP_SERVER_LOGS', logDir);
+        vi.resetModules();
+        const {startCodexConnection: startWithFileLogs} = await import('../CodexJsonRpcConnection');
+        const freshSpawn = (await import('node:child_process')).spawn;
+        await spawnStderrFixture(freshSpawn);
+        const forwarded: string[] = [];
+        vi.spyOn(process.stderr, 'write').mockImplementation(((chunk: unknown) => {
+            forwarded.push(String(chunk));
+            return true;
+        }) as typeof process.stderr.write);
+
+        const started = startWithFileLogs('/synthetic/codex', {});
+        await once(started.process.stderr, 'data');
+
+        expect(forwarded.join('')).toContain('app-server diagnostic line');
+        const fileLog = await readFile(path.join(logDir, 'app-server.log'), 'utf8');
+        expect(fileLog).toContain('[ERR] app-server diagnostic line');
+        expect(await started.connection.sendRequest('probe')).toEqual({echo: 'probe'});
     });
 
     it('rejects unowned process tokens before starting native Codex', async () => {

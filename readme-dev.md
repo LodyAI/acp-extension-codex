@@ -49,7 +49,7 @@ cannot release its prompt. See the [cancellation boundary decision](.agents/note
 - `DEFAULT_AUTH_REQUEST` - ACP auth request JSON used when Codex requires authentication.
 - `INITIAL_AGENT_MODE` - initial mode id: `read-only`, `agent`, `agent-auto-review`, or `agent-full-access`.
 - `NO_BROWSER` - hide browser-based ChatGPT auth when set.
-- `APP_SERVER_LOGS` - directory for adapter logs.
+- `APP_SERVER_LOGS` - directory for adapter logs. App-server stderr always forwards to the adapter's own stderr while the child lives, independent of this variable; the file copy under `<dir>/app-server.log` stays opt-in. stdout remains JSON-RPC only.
 
 For a managed ChatGPT profile, a native session-open error never triggers the
 adapter's legacy automatic logout: another process may already have refreshed

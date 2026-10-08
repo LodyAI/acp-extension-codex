@@ -95,6 +95,10 @@ function attachLogs(proc: ChildProcessWithoutNullStreams) {
     };
 
     proc.stderr.on("data", (data) => {
+        // The app-server owns stdout for JSON-RPC; its stderr carries live
+        // diagnostics and must reach the adapter's own stderr while the child
+        // is alive, with or without APP_SERVER_LOGS file logging.
+        process.stderr.write(data);
         logger.log(`[ERR] ${data.toString()}`);
     });
     proc.stdout.on("data", (data: Buffer) => {
