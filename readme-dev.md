@@ -215,3 +215,8 @@ New request option `_meta.mcpStartupAwaitTimeoutMs` on session new/resume/fork i
 an optional positive millisecond budget for awaiting requested MCP servers. Omitted
 or nonpositive values do not wait; expiry does not cancel startup. Session load
 ignores this option. See [MCP startup waiting](docs/mcp-startup-await-timeout.md).
+
+
+## Startup model selection
+
+Core's `_meta.lody.sessionConfig` version 1 supplies optional `modelId` and a `configOptionValues` dictionary on new/load/resume/fork. The adapter applies model and reasoning to native configuration before establishing the thread. Explicit `modelId` wins over the `model` option; `reasoning_effort` wins over a legacy `model[effort]` suffix. Missing selection preserves native defaults, while malformed selection fails with invalid params. Other options still use live ACP configuration. Native model-mismatch warnings are preserved for intentional switches.

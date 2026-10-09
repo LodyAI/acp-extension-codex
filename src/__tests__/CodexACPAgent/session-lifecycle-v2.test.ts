@@ -49,24 +49,24 @@ function createThread(overrides?: Partial<Thread>): Thread {
 }
 
 /** Canned Codex app-server responses, keyed by method. */
-function codexResponse(method: string, replayTurns: Thread["turns"] = []): unknown {
+function codexResponse(method: string, replayTurns: Thread["turns"] = [], model = "gpt-5", effort = "medium"): unknown {
     switch (method) {
         case "thread/start":
         case "thread/resume":
             return {
                 thread: createThread(),
-                model: "gpt-5",
+                model,
                 modelProvider: "openai",
-                reasoningEffort: "medium",
+                reasoningEffort: effort,
                 serviceTier: null,
                 turnsBackwardsCursor: null,
             };
         case "thread/fork":
             return {
                 thread: createThread({id: forkedSessionId, sessionId: forkedSessionId}),
-                model: "gpt-5",
+                model,
                 modelProvider: "openai",
-                reasoningEffort: "medium",
+                reasoningEffort: effort,
                 serviceTier: null,
             };
         case "thread/read":
@@ -114,7 +114,10 @@ async function connectV2Client(options?: {
         if (options?.failMethod?.method === method) {
             throw options.failMethod.error;
         }
-        return codexResponse(method, options?.replayTurns);
+        const config = (params as {config?: Record<string, unknown>} | undefined)?.config;
+        return codexResponse(method, options?.replayTurns,
+            typeof config?.["model"] === "string" ? config["model"] : undefined,
+            typeof config?.["model_reasoning_effort"] === "string" ? config["model_reasoning_effort"] : undefined);
     });
     const codexAcpClient = new CodexAcpClient(new CodexAppServerClient(mocks.mockCodexConnection as any));
     vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
@@ -168,6 +171,58 @@ describe('Session lifecycle over ACP v2', () => {
         closeClient = null;
         vi.clearAllMocks();
         expectConformingV2SessionUpdates();
+    });
+
+    it.each(["new", "resume", "load", "fork"] as const)(
+        "establishes %s with the selected model before applying live configuration",
+        async (operation) => {
+            const {connection, agent} = await connectV2Client();
+            closeClient = () => connection.close();
+            const request = {
+                cwd,
+                _meta: {lody: {sessionConfig: {
+                    version: 1,
+                    modelId: "selected-model[high]",
+                    configOptionValues: {model: "gpt-5", reasoning_effort: "medium"},
+                }}},
+            };
+            const response = operation === "new"
+                ? await connection.agent.request(acpV2.methods.agent.session.new, request)
+                : operation === "fork"
+                    ? await connection.agent.request(acpV2.methods.agent.session.fork, {...request, sessionId})
+                    : await connection.agent.request(acpV2.methods.agent.session.resume, {
+                        ...request, sessionId, ...(operation === "load" ? {replayFrom: {type: "start"}} : {}),
+                    });
+            expect(response.configOptions?.find(option => option.configId === "model")?.currentValue).toBe("selected-model");
+            expect(agent().getSessionState(operation === "fork" ? forkedSessionId : sessionId).currentModelId)
+                .toBe("selected-model[medium]");
+        },
+    );
+
+    it.each([
+        {modelId: "selected-model[high]", configOptionValues: {}, effort: "high"},
+        {configOptionValues: {model: "selected-model", reasoning_effort: "low"}, effort: "low"},
+    ])("preserves legacy effort and option-only startup selections", async ({effort, ...selection}) => {
+        const {connection, agent} = await connectV2Client();
+        closeClient = () => connection.close();
+        await connection.agent.request(acpV2.methods.agent.session.resume, {
+            sessionId, cwd, _meta: {lody: {sessionConfig: {version: 1, ...selection}}},
+        });
+        expect(agent().getSessionState(sessionId).currentModelId).toBe(`selected-model[${effort}]`);
+    });
+
+    it.each([
+        {version: 2, configOptionValues: {}},
+        {version: 1, modelId: "", configOptionValues: {}},
+        {version: 1, configOptionValues: {model: true}},
+        {version: 1, modelId: "gpt-5", configOptionValues: {reasoning_effort: true}},
+    ])("rejects invalid startup configuration without establishing a native thread", async (sessionConfig) => {
+        const {connection, codexRequests} = await connectV2Client();
+        closeClient = () => connection.close();
+        await expect(connection.agent.request(acpV2.methods.agent.session.resume, {
+            sessionId, cwd, _meta: {lody: {sessionConfig}},
+        })).rejects.toMatchObject({code: -32602});
+        expect(codexRequests.filter(request => request.method === "thread/resume")).toEqual([]);
     });
 
     it('creates a session without mcpServers and answers with sessionId and configOptions only', async () => {

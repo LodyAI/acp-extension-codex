@@ -1,3 +1,4 @@
+import {readStartupModelConfig} from "./ModelConfigOption";
 import {readWorktreeProject, WorktreeProjects} from "./WorktreeProject";
 import {
     type ApiKeyAuthRequest,
@@ -597,7 +598,7 @@ export class CodexAcpClient {
 
         const response = await this.resumeThread({
             excludeTurns: true,
-            config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
+            config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? [], request._meta),
             cwd: request.cwd,
             modelProvider: await this.getResumeModelProvider(),
             threadId: request.sessionId,
@@ -624,8 +625,8 @@ export class CodexAcpClient {
             codexClient: this.codexClient,
             backfillProject: (thread, project) => this.worktreeProjects.backfill(thread, project),
             refreshSkills: (cwd, directories) => this.refreshSkills(cwd, directories),
-            createSessionConfig: (cwd, directories, mcpServers) =>
-                this.createSessionConfig(cwd, directories, mcpServers),
+            createSessionConfig: (cwd, directories, mcpServers, meta) =>
+                this.createSessionConfig(cwd, directories, mcpServers, meta),
             getResumeModelProvider: () => this.getResumeModelProvider(),
             fetchAvailableModels: () => this.fetchAvailableModels(),
             createCurrentModelId: (models, model, reasoningEffort) =>
@@ -641,7 +642,7 @@ export class CodexAcpClient {
 
         const response = await this.resumeThread({
             excludeTurns: true,
-            config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
+            config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? [], request._meta),
             cwd: request.cwd,
             modelProvider: await this.getResumeModelProvider(),
             threadId: request.sessionId,
@@ -724,7 +725,7 @@ export class CodexAcpClient {
         const projectId = await this.worktreeProjects.resolve(project);
         const response = await this.codexClient.threadStart({
             ...(projectId ? {projectId} : {}),
-            config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
+            config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? [], request._meta),
             modelProvider: this.getModelProvider(),
             cwd: request.cwd,
         });
@@ -879,7 +880,8 @@ export class CodexAcpClient {
     private async createSessionConfig(
         projectPath: string,
         additionalDirectories: string[],
-        mcpServers: Array<AcpMcpServer>
+        mcpServers: Array<AcpMcpServer>,
+        meta?: unknown,
     ): Promise<JsonObject> {
         const sessionRoots = [projectPath, ...additionalDirectories];
         const activeProvider = this.gatewayConfig
@@ -897,6 +899,7 @@ export class CodexAcpClient {
         });
         const mergedConfig = {
             ...forceGitRootTurnDiffPaths(mergeGatewayConfig(this.config, this.gatewayConfig)),
+            ...readStartupModelConfig(meta),
             projects: Object.fromEntries(sessionRoots.map(root => [root, {
                 trust_level: "trusted",
             }])),
