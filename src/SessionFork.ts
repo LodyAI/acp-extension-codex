@@ -20,6 +20,7 @@ export type SessionForkDependencies = {
         cwd: string,
         additionalDirectories: string[],
         mcpServers: AcpMcpServer[],
+        meta?: unknown,
     ): Promise<NonNullable<ThreadForkParams["config"]>>;
     getResumeModelProvider(): Promise<string>;
     fetchAvailableModels(): Promise<Model[]>;
@@ -41,6 +42,7 @@ export async function forkSession(
             request.cwd,
             additionalDirectories,
             request.mcpServers ?? [],
+            request._meta,
         ),
         cwd: request.cwd,
         ...(lastTurnId !== undefined && {lastTurnId}),

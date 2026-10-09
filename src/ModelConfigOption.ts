@@ -1,3 +1,6 @@
+import {RequestError} from "@agentclientprotocol/sdk";
+import {z} from "zod";
+import type {LodySessionConfig} from "acp-extension-core";
 import type {SessionConfigOption} from "@agentclientprotocol/sdk";
 import type {ReasoningEffort} from "./app-server";
 import type {Model, ReasoningEffortOption} from "./app-server/v2";
@@ -103,5 +106,43 @@ export function createReasoningEffortConfigOption(
         ...(recommendation
             ? {_meta: withAirMeta(undefined, AIR_RECOMMENDED_CONFIG_VALUE_KEY, recommendation)}
             : {}),
+    };
+}
+
+
+const startupConfigSchema: z.ZodType<LodySessionConfig> = z.object({
+    version: z.literal(1),
+    modelId: z.string().min(1).optional(),
+    configOptionValues: z.record(z.string(), z.union([z.string(), z.boolean()])),
+});
+
+/** Translate the driving turn before Codex restores a thread or checks its recorded model. */
+export function readStartupModelConfig(meta: unknown): {model?: string; model_reasoning_effort?: string} {
+    if (typeof meta !== "object" || meta === null) return {};
+    const lody = (meta as Record<string, unknown>)["lody"];
+    if (typeof lody !== "object" || lody === null) return {};
+    const raw = (lody as Record<string, unknown>)["sessionConfig"];
+    if (raw === undefined) return {};
+    const parsed = startupConfigSchema.safeParse(raw);
+    if (!parsed.success) throw RequestError.invalidParams(undefined, "Invalid sessionConfig version 1");
+    const {modelId, configOptionValues} = parsed.data;
+    const selectedModel = modelId ?? configOptionValues[MODEL_CONFIG_ID];
+    const selectedEffort = configOptionValues[REASONING_EFFORT_CONFIG_ID];
+    if (selectedModel !== undefined && (typeof selectedModel !== "string" || !selectedModel.trim())) {
+        throw RequestError.invalidParams(undefined, "Invalid sessionConfig model");
+    }
+    const legacyModel = typeof selectedModel === "string" && selectedModel.includes("[")
+        ? selectedModel.match(/^([^\[]+)\[([^\]]+)\]$/)
+        : undefined;
+    if (typeof selectedModel === "string" && selectedModel.includes("[") && !legacyModel) {
+        throw RequestError.invalidParams(undefined, "Invalid sessionConfig model");
+    }
+    const effort = selectedEffort ?? legacyModel?.[2];
+    if (effort !== undefined && (typeof effort !== "string" || !effort.trim())) {
+        throw RequestError.invalidParams(undefined, "Invalid sessionConfig reasoning effort");
+    }
+    return {
+        ...(selectedModel !== undefined ? {model: legacyModel?.[1] ?? selectedModel} : {}),
+        ...(typeof effort === "string" ? {model_reasoning_effort: effort} : {}),
     };
 }
