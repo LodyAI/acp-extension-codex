@@ -84,6 +84,9 @@
         },
         "worktreeProject": {
           "version": 1
+        },
+        "mcpApps": {
+          "version": 1
         }
       }
     }
