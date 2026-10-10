@@ -169,7 +169,6 @@ import {
     sameAuthStatus,
 } from "./AuthStatusMeta";
 import {randomUUID} from "node:crypto";
-import {TitleGenerator} from "./TitleGenerator";
 import {once} from "node:events";
 import {
     AIR_AGENT_FILE_CHANGE_REPORT_KEY,
@@ -250,7 +249,6 @@ export interface SessionState {
     sessionTitle: string | null;
     sessionTitleSource: "unset" | "fallback" | "explicit" | "unknown";
     sessionFailure?: SessionFailure;
-    titleGen?: TitleGenerator;
     subagents: CodexSubagentEventRouter;
     asyncTasks: CodexBackgroundTerminalTasks;
     compactions: CodexSessionCompactions;
@@ -273,7 +271,7 @@ export interface SessionState {
 
 type HistoryProjectionState = Pick<
     SessionState,
-    "sessionId" | "sessionTitle" | "sessionTitleSource" | "titleGen"
+    "sessionId" | "sessionTitle" | "sessionTitleSource"
 >;
 
 export type SessionFailureCategory =
@@ -298,13 +296,6 @@ export interface SessionFailure {
 }
 
 const CODEX_PROCESS_EXITED_ERROR_CODE = 1001;
-
-/**
- * How long `session/load` waits for an in-flight title generation to settle
- * before answering anyway. Generous enough for a title model round-trip, short
- * enough that a wedged generation cannot hold a load open.
- */
-const TITLE_GENERATION_SETTLE_TIMEOUT_MS = 10_000;
 
 /**
  * Backoff for re-sending `turn/interrupt` when Codex reports the turn is not
@@ -1124,12 +1115,6 @@ export class CodexAcpServer {
             openToolCalls: new CodexSessionToolCalls(),
             awaitingClientLoad: operation.kind === "fork",
         };
-        sessionState.titleGen = new TitleGenerator(
-            this.codexAcpClient.appServerClient,
-            sessionId,
-            sessionState.cwd,
-            () => sessionState.sessionTitleSource,
-        );
         if (operation.kind === "new") sessionState.turnUsage = new CodexTurnUsage(true);
         this.installSessionState(sessionState);
         if (operation.kind === "resume") settleTrackerReady(sessionState);
@@ -1502,10 +1487,6 @@ export class CodexAcpServer {
         modelState: LegacySessionModelState;
         modeState: SessionModeState;
     }> {
-        // Captured before the load installs a fresh SessionState: a title
-        // generation started by an earlier turn on this session belongs to the
-        // state being replaced, and has to settle before we answer.
-        const previousTitleGen = this.sessions.get(params.sessionId)?.titleGen;
         const {
             sessionId,
             modelState,
@@ -1542,9 +1523,6 @@ export class CodexAcpServer {
             throw err;
         }
         await this.getSessionState(sessionId).asyncTasks.reconcile();
-        // A load response means "the replay is complete"; a late rename echo
-        // from a still-running title generation would arrive after it.
-        await previousTitleGen?.waitForIdle(TITLE_GENERATION_SETTLE_TIMEOUT_MS);
 
         this.publishAvailableCommandsAsync(sessionId, availableCommands);
         return {sessionId, modelState, modeState};
@@ -2969,12 +2947,6 @@ export class CodexAcpServer {
             openToolCalls: new CodexSessionToolCalls(),
             awaitingClientLoad: false,
         };
-        sessionState.titleGen = new TitleGenerator(
-            this.codexAcpClient.appServerClient,
-            sessionId,
-            sessionState.cwd,
-            () => sessionState.sessionTitleSource,
-        );
         this.installSessionState(sessionState);
         this.publishRateLimitsAsync(sessionState);
         subscribed = false;
@@ -3220,7 +3192,6 @@ export class CodexAcpServer {
         if (explicitTitle) {
             sessionState.sessionTitle = explicitTitle;
             sessionState.sessionTitleSource = "explicit";
-            sessionState.titleGen?.markExistingTitle();
             await session.update({
                 sessionUpdate: "session_info_update",
                 title: explicitTitle,
@@ -4779,19 +4750,6 @@ export class CodexAcpServer {
                 () => this.sessions.get(sessionState.sessionId) === sessionState,
                 true,
             );
-
-            // Fire-and-forget: generate an AI title from the first turn.
-            // Never await — must not block the prompt response.
-            // Note: turn.items contains only agent output, not the user message —
-            // extract prompt text from params instead.
-            if (sessionState.titleGen) {
-                const promptText = params.prompt
-                    .filter((b): b is Extract<acp.ContentBlock, { type: "text" }> => b.type === "text")
-                    .map(b => b.text)
-                    .join(" ")
-                    .trim();
-                sessionState.titleGen.onTurnCompleted(promptText);
-            }
 
             // On v2, a prompt whose user message was never recorded (`pendingInsertion` still set)
             // never happened from the client's view, so it must not leave a title behind either.

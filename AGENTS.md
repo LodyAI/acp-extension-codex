@@ -97,7 +97,8 @@
   provider errors in ACP metadata or `RequestError` data. Session title updates must identify
   `_meta.lody.titleSource` as `explicit`,
   `fallback`, or `unset` so hosts can accept real names without mistaking prompt previews for
-  generated titles.
+  generated titles. Automatic generation belongs to the ACP client; never advertise
+  `sessionTitle` or start an auxiliary title turn here.
 - Account rate-limit windows are dynamic. Read the full `account/rateLimits/read` snapshot when a
   session opens, merge sparse `account/rateLimits/updated` values into that snapshot, and preserve
   each native window's `windowDurationMins` when mapping it to Core's
