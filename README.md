@@ -187,3 +187,11 @@ Native name events do not distinguish generated names from manual renames. Promp
 previews remain `fallback` and cleared names `unset`, so clients can skip duplicate
 generation without adopting a preview. Existing named/resumed sessions retain their
 current title behavior; generation remains best effort.
+
+Title-generation failures are diagnostic-only: they do not become ACP conversation
+messages or fail the main prompt. Search for `Title generation` in
+`$APP_SERVER_LOGS/app-server.log`, or the adapter's stderr when file logging is
+not configured. Failed turns include the main/title thread IDs, turn ID, model,
+status, and the native error object (including provider details). Exceptions and
+completed turns without a usable title are also logged; the source prompt and
+generated output are not included in these diagnostics.

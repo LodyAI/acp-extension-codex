@@ -1,5 +1,6 @@
 import type { CodexAppServerClient } from "./CodexAppServerClient";
 import type { Turn } from "./app-server/v2";
+import { logger } from "./Logger";
 
 // Use cheap model to generate a title
 const TITLE_MODEL = "gpt-5.6-luna";
@@ -75,8 +76,9 @@ export class TitleGenerator {
         if (src === "explicit" || src === "unknown") return;
         this.generated = true;
         const run = this.generateAndPersist(userPromptText)
-            .catch(() => {
-                // title generation is best-effort; never surface errors to the user
+            .catch((error: unknown) => {
+                // Diagnostics only: title failures must never enter the ACP conversation.
+                logger.error(`Title generation failed (mainThreadId=${this.mainThreadId}, model=${TITLE_MODEL})`, error);
             })
             .finally(() => {
                 if (this.inFlight === run) this.inFlight = null;
@@ -130,8 +132,20 @@ export class TitleGenerator {
             model: TITLE_MODEL,
         });
 
-        const title = extractTitle(turnResult.turn);
-        if (!title) return;
+        const turn = turnResult.turn;
+        const context = `mainThreadId=${this.mainThreadId}, titleThreadId=${epThread.id}, turnId=${turn.id}, model=${TITLE_MODEL}, status=${turn.status}`;
+        if (turn.status !== "completed" || turn.error) {
+            // Serialize the native error explicitly: Logger's generic object fallback
+            // would otherwise lose the provider details as "[object Object]".
+            logger.error(`Title generation turn failed (${context})`, JSON.stringify(turn.error));
+            return;
+        }
+
+        const title = extractTitle(turn);
+        if (!title) {
+            logger.error(`Title generation returned no usable title (${context})`, "Missing or malformed title JSON");
+            return;
+        }
 
         // Guard: user may have renamed the session while generation was running.
         // CodexEventHandler sets sessionTitleSource = "explicit" on thread/name/updated.
