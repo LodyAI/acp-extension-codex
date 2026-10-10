@@ -654,7 +654,6 @@ export class CodexEventHandler {
                 this.sessionState.sessionTitleSource = notification.params.threadName == null
                     ? "unset"
                     : "explicit";
-                this.sessionState.titleGen?.observeRename();
                 return {
                     sessionUpdate: "session_info_update",
                     title: notification.params.threadName ?? null,

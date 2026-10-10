@@ -178,20 +178,12 @@ owners. It does not enable Codex-managed worktree badges or Handoff. Standard
 `session/list.cwd` still filters execution directories. `ProjectApi.ts` contains
 the narrow experimental native API subset omitted by stable type generation.
 
-## Automatic session titles
+## Session titles
 
-The adapter advertises Core `agentCapabilities._meta.lody.sessionTitle: { version: 1 }`.
-Its existing automatic generator names the native thread; native name updates are
-published through ACP `session_info_update` with `_meta.lody.titleSource: "explicit"`.
-Native name events do not distinguish generated names from manual renames. Prompt
-previews remain `fallback` and cleared names `unset`, so clients can skip duplicate
-generation without adopting a preview. Existing named/resumed sessions retain their
-current title behavior; generation remains best effort.
+Automatic title generation belongs to the ACP client. The adapter does not start
+an auxiliary model turn and does not advertise Core `sessionTitle`. Lody exposes
+its independent title session's model, reasoning, and permissions in Provider settings.
 
-Title-generation failures are diagnostic-only: they do not become ACP conversation
-messages or fail the main prompt. Search for `Title generation` in
-`$APP_SERVER_LOGS/app-server.log`, or the adapter's stderr when file logging is
-not configured. Failed turns include the main/title thread IDs, turn ID, model,
-status, and the native error object (including provider details). Exceptions and
-completed turns without a usable title are also logged; the source prompt and
-generated output are not included in these diagnostics.
+Native name updates remain ACP `session_info_update` notifications tagged
+`_meta.lody.titleSource: "explicit"`. Prompt previews remain `fallback` and cleared
+names `unset`; clients must not treat prompt previews as generated titles.

@@ -138,38 +138,3 @@ describe("sessions Codex has not materialized on disk", () => {
             .rejects.toThrow("disk is full");
     });
 });
-
-describe("session/load and a title generation left over from an earlier turn", () => {
-    it("waits for the rename to land before answering", async () => {
-        const {fixture, appServer} = createFixture();
-        appServer.threadResume = vi.fn().mockRejectedValue(NO_ROLLOUT(threadId));
-        appServer.threadRead = vi.fn().mockResolvedValue({thread: createLiveThread()});
-        appServer.threadStart = vi.fn().mockResolvedValue({
-            thread: createLiveThread(),
-            model: "model-id",
-            modelProvider: "openai",
-            reasoningEffort: "medium",
-            serviceTier: null,
-        });
-        const agent = fixture.getCodexAcpAgent();
-        await agent.newSession({cwd: "/test/cwd", mcpServers: []});
-
-        let settled = false;
-        const titleGeneration = new Promise<void>(resolve => {
-            setTimeout(() => {
-                settled = true;
-                resolve();
-            }, 20);
-        });
-        agent.getSessionState(threadId).titleGen = {
-            waitForIdle: () => titleGeneration,
-            markExistingTitle: () => {},
-        } as unknown as NonNullable<ReturnType<typeof agent.getSessionState>["titleGen"]>;
-
-        await agent.loadSession({sessionId: threadId, cwd: "/test/cwd", mcpServers: []});
-
-        // The load response means "the replay is complete"; a rename echo from
-        // a still-running generation would arrive after it.
-        expect(settled).toBe(true);
-    });
-});
