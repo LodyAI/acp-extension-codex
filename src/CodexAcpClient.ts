@@ -61,6 +61,7 @@ import type {
 import packageJson from "../package.json";
 import type {AuthenticationStatusResponse} from "./AcpExtensions";
 import {createCodexCollaborationMode} from "./CollaborationModeConfig";
+import {clientSupportsMcpApps, MCP_APPS_APP_SERVER_EXTENSIONS} from "./McpApps";
 import type {ModeKind} from "./app-server/ModeKind";
 import {arePathBasenamesEqual, arePathsEqual, isAbsolutePathLike} from "./PathUtils";
 import {CodexSubagentSubscriptions} from "./subagents/CodexSubagentSubscriptions";
@@ -162,11 +163,15 @@ export class CodexAcpClient {
         name: `${packageJson.name}`, title: "Codex ACP", version: `${packageJson.version}`
     };
 
-    async initialize(request: Pick<acp.InitializeRequest, "clientInfo">): Promise<void> {
+    async initialize(request: Pick<acp.InitializeRequest, "clientInfo" | "clientCapabilities">): Promise<void> {
         const response = await this.codexClient.initialize({
             capabilities: {
                 experimentalApi: true,
                 requestAttestation: false,
+                // ACP initialize precedes this, so only hosts that render apps opt servers in.
+                ...(clientSupportsMcpApps(request.clientCapabilities)
+                    ? {extensions: MCP_APPS_APP_SERVER_EXTENSIONS}
+                    : {}),
             },
             clientInfo: {
                 name: request.clientInfo?.name ?? this.defaultClientInfo.name,
