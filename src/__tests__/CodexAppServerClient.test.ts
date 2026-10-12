@@ -86,7 +86,7 @@ describe("CodexAppServerClient turn lifecycle", () => {
         const compact = h.client.runCompact({threadId: "thread-1"});
         if (started) h.start();
         h.close();
-        await expect(compact).rejects.toThrow("Codex process exited before completing the turn");
+        await expect(compact).rejects.toThrow("The connection to the Codex app-server was lost while waiting for the end of the turn.");
     });
 
     it("releases a rejected compact start so a later request can run", async () => {
@@ -127,7 +127,7 @@ describe("CodexAppServerClient turn lifecycle", () => {
             () => closeConnection?.(),
         );
 
-        await expect(turn).rejects.toThrow("Codex process exited before completing the turn");
+        await expect(turn).rejects.toThrow("The connection to the Codex app-server was lost while waiting for the end of the turn.");
     });
 
     it("buffers a native review start that arrives before the review response", async () => {
@@ -220,7 +220,7 @@ describe("CodexAppServerClient turn lifecycle", () => {
         const review = h.client.runReview({
             threadId: "thread-1", target: {type: "uncommittedChanges"}, delivery: "inline",
         });
-        const rejected = expect(review).rejects.toThrow("Codex process exited before completing the turn");
+        const rejected = expect(review).rejects.toThrow("The connection to the Codex app-server was lost while waiting for the end of the turn.");
         await completionRegistered;
         if (started) h.start("thread-1", "native-review-turn");
         h.close();

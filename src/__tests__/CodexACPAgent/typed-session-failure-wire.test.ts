@@ -105,7 +105,7 @@ describe("typed session failures over ACP transport", () => {
     it("delivers workspace routing text and a network hint instead of a bare Internal error", async () => {
         const fixture = createWireFixture();
         await fixture.initialize();
-        vi.spyOn(fixture.codexClient, "authRequired").mockResolvedValue(false);
+        vi.spyOn(fixture.codexClient, "readAuthRequirement").mockResolvedValue({required: false, account: null});
         vi.spyOn(fixture.appServer, "threadStart").mockRejectedValue(
             new ResponseError(-32603, "workspace routing discovery timed out"),
         );

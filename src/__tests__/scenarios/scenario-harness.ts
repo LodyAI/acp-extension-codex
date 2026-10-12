@@ -23,11 +23,13 @@ export const AIR_CAPABILITY_NAMES = [
     "diffPatch",
     "sessionFailure",
     "agentFileChangeReport",
+    "customInstructions",
     "nativeSubagentSessions",
     "asyncTasks",
     "recommendedValue",
     "rawInputRendering",
     "planContentDelta",
+    "codexHooks",
 ];
 
 /** The client capabilities of each client profile. */
@@ -119,7 +121,7 @@ async function runInWorkspace(
 
     const anyClient = client as any;
     const anyAppServer = appServer as any;
-    anyClient.authRequired = vi.fn().mockResolvedValue(false);
+    anyClient.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
     anyClient.getAccount = vi.fn().mockResolvedValue({account: null, requiresOpenaiAuth: false});
     anyClient.listSkills = vi.fn().mockResolvedValue({data: []});
     anyClient.newSession = vi.fn().mockResolvedValue({

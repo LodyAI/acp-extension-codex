@@ -2,6 +2,9 @@ import type {
     CodexProjectRequest, ProjectCreateParams, ProjectCreateResponse, ThreadProjectUpdateParams,
 } from "./ProjectApi";
 import {type MessageConnection, RequestType} from "vscode-jsonrpc/node";
+import {AppServerConnectionLostError, ConnectionLoss} from "./app-server-recovery/ConnectionLoss";
+import {McpOauthCompletions} from "./mcp/McpOauthCompletions";
+import {McpStartupTracker} from "./mcp/McpStartupTracker";
 import type {
     ClientRequest,
     InitializeParams,
@@ -13,9 +16,13 @@ import type {
     CancelLoginAccountResponse,
     ConfigReadParams,
     ConfigReadResponse,
+    ConfigBatchWriteParams,
+    ConfigWriteResponse,
     GetAccountParams,
     GetAccountRateLimitsResponse,
     GetAccountResponse,
+    HooksListParams,
+    HooksListResponse,
     ListMcpServerStatusParams,
     ListMcpServerStatusResponse,
     LoginAccountParams,
@@ -25,9 +32,7 @@ import type {
     McpServerElicitationRequestResponse,
     McpServerOauthLoginParams,
     McpServerOauthLoginResponse,
-    McpServerOauthLoginCompletedNotification,
-    McpServerStartupFailureReason,
-    McpServerStartupState,
+    McpServerRefreshResponse,
     McpServerStatusUpdatedNotification,
     ModelListParams,
     ModelListResponse,
@@ -42,6 +47,10 @@ import type {
     ThreadStatusChangedNotification,
     ThreadArchiveParams,
     ThreadArchiveResponse,
+    ThreadDeleteParams,
+    ThreadDeleteResponse,
+    ThreadUnarchiveParams,
+    ThreadUnarchiveResponse,
     ThreadCompactStartParams,
     ThreadCompactStartResponse,
     ThreadGoalClearedNotification,
@@ -114,18 +123,6 @@ type ExperimentalThreadForkParams = ThreadForkParams & {
     excludeTurns?: boolean;
 };
 
-export type McpStartupFailure = {
-    server: string;
-    error: string;
-    failureReason?: McpServerStartupFailureReason;
-};
-
-export type McpStartupResult = {
-    ready: Array<string>;
-    failed: Array<McpStartupFailure>;
-    cancelled: Array<string>;
-};
-
 const CommandExecutionApprovalRequest = new RequestType<
     CommandExecutionRequestApprovalParams,
     CommandExecutionRequestApprovalResponse,
@@ -166,9 +163,6 @@ export class CodexAppServerClient {
     readonly connection: MessageConnection;
     private approvalHandlers = new Map<string, ApprovalHandler>();
     private elicitationHandlers = new Map<string, ElicitationHandler>();
-    private mcpServerStartupVersion = 0;
-    private readonly mcpServerStartupStates = new Map<string, McpServerStartupSnapshot>();
-    private readonly mcpServerStartupResolvers: Array<McpServerStartupResolver> = [];
     private readonly pendingTurnCompletionResolvers = new Map<string, Map<string, {
         resolve: (event: TurnCompletedNotification) => void;
         reject: (error: Error) => void;
@@ -179,6 +173,8 @@ export class CodexAppServerClient {
         resolve: (event: TurnCompletedNotification) => void;
         reject: (error: Error) => void;
     }>();
+    readonly mcpStartup = new McpStartupTracker();
+    readonly mcpOauthCompletions = new McpOauthCompletions();
     private readonly turnCompletionCaptures = new Map<string, Set<(event: TurnCompletedNotification) => void>>();
     private readonly turnStartCaptures = new Set<(threadId: string, turnId: string) => void>();
     private readonly turnRoutingCaptures = new Map<string, Set<(turnId: string, notification: ServerNotification) => void>>();
@@ -188,32 +184,32 @@ export class CodexAppServerClient {
     private readonly threadSettings = new Map<string, ThreadSettings>();
     private readonly tokenUsage = new Map<string, import("./app-server/v2").ThreadTokenUsageUpdatedNotification>();
     private readonly staleTurnIds = new Map<string, Set<string>>();
+    readonly connectionLoss: ConnectionLoss;
     private turnCompletionTerminalError: Error | null = null;
 
     constructor(connection: MessageConnection) {
         this.connection = connection;
+        this.connectionLoss = new ConnectionLoss(connection);
+        this.connection.onClose?.(() => this.disposeMcpWaits());
+        this.connection.onDispose?.(() => this.disposeMcpWaits());
         // Process exit disposes the connection (see CodexJsonRpcConnection);
         // fail waiters that only a now-impossible notification could settle.
         const failPendingTurns = () => {
-            const error = new Error("Codex process exited before completing the turn");
+            const error = new AppServerConnectionLostError("the end of the turn");
             this.rejectAllPendingTurnCompletions(error);
         };
-        this.connection.onClose(failPendingTurns);
-        this.connection.onDispose(failPendingTurns);
+        this.connection.onClose?.(failPendingTurns);
+        this.connection.onDispose?.(failPendingTurns);
         this.connection.onUnhandledNotification((data) => {
             const serverNotification = data as ServerNotification;
             if (serverNotification.method === "thread/tokenUsage/updated") {
                 this.tokenUsage.set(serverNotification.params.threadId, serverNotification.params);
             }
             if (isMcpServerStatusUpdatedNotification(serverNotification)) {
-                this.mcpServerStartupVersion += 1;
-                this.mcpServerStartupStates.set(serverNotification.params.name, {
-                    status: serverNotification.params.status,
-                    error: serverNotification.params.error,
-                    failureReason: serverNotification.params.failureReason ?? null,
-                    version: this.mcpServerStartupVersion,
-                });
-                this.resolveMcpServerStartupResolvers();
+                this.mcpStartup.record(serverNotification.params);
+            }
+            if (serverNotification.method === "mcpServer/oauthLogin/completed") {
+                this.mcpOauthCompletions.complete(serverNotification.params);
             }
             if (isTurnCompletedNotification(serverNotification)) {
                 const compact = this.pendingCompactTurns.get(serverNotification.params.threadId);
@@ -499,6 +495,7 @@ export class CodexAppServerClient {
             noGoalTurnStarted.threadStatusChanged(status);
         });
 
+        const whileConnected = <T>(wait: Promise<T>) => this.waitWhileConnected("the goal update", wait);
         try {
             const goalSetResponse = await this.threadGoalSet(params);
             expectedGoal = goalSetResponse.goal;
@@ -510,10 +507,10 @@ export class CodexAppServerClient {
                 noGoalTurnStarted.goalUpdated();
             }
             if (expectedGoal.status !== "active") {
-                await matchingGoalUpdateHandled;
+                await whileConnected(matchingGoalUpdateHandled);
                 return null;
             }
-            const turnId = goalTurnId ?? await Promise.race([goalTurnStarted, noGoalTurnStarted.promise]);
+            const turnId = goalTurnId ?? await whileConnected(Promise.race([goalTurnStarted, noGoalTurnStarted.promise]));
             noGoalTurnStarted.release();
             releaseRoutingCapture();
             releaseStatusCapture();
@@ -525,7 +522,7 @@ export class CodexAppServerClient {
             if (earlyCompletion) {
                 return earlyCompletion;
             }
-            return await goalTurnCompleted;
+            return await whileConnected(goalTurnCompleted);
         } finally {
             noGoalTurnStarted.release();
             releaseCompletionCapture();
@@ -551,7 +548,7 @@ export class CodexAppServerClient {
             if (!response.cleared || goalClearedHandled) {
                 return;
             }
-            await matchingGoalClearedHandled;
+            await this.waitWhileConnected("the goal clear", matchingGoalClearedHandled);
         } finally {
             releaseGoalClearedCapture();
         }
@@ -740,16 +737,10 @@ export class CodexAppServerClient {
      * thread/resume. Without it, they end at the newest item when the read
      * starts, so an item that arrives during the read is not in the pages.
      */
-    async *threadItemPages(
-        threadId: string,
-        options: {lastItemCursor?: string | null; turnId?: string} = {},
-    ): AsyncGenerator<ThreadItem[]> {
-        for await (const page of this.threadItemEntryPages(threadId, options)) {
-            yield page.map(entry => entry.item);
-        }
+    async *threadItemPages(threadId: string, options: {lastItemCursor?: string | null; turnId?: string} = {}): AsyncGenerator<ThreadItem[]> {
+        for await (const page of this.threadItemEntryPages(threadId, options)) yield page.map(entry => entry.item);
     }
 
-    /** The pages of {@link threadItemPages}, with the turn of each item. */
     async *threadItemEntryPages(
         threadId: string,
         options: {lastItemCursor?: string | null; turnId?: string} = {},
@@ -770,14 +761,15 @@ export class CodexAppServerClient {
             cursor,
             limit: HISTORY_PAGE_ITEMS,
             sortDirection: "asc",
-        }));
+        }), page => page.some(entry => entry.item.id === lastItemId));
         for await (const page of pages) {
-            const lastIndex = page.findIndex(entry => entry.item.id === lastItemId);
+            const items = page;
+            const lastIndex = items.findIndex(entry => entry.item.id === lastItemId);
             if (lastIndex >= 0) {
-                yield page.slice(0, lastIndex + 1);
+                yield items.slice(0, lastIndex + 1);
                 return;
             }
-            yield page;
+            yield items;
         }
     }
 
@@ -851,6 +843,14 @@ export class CodexAppServerClient {
         return await this.sendRequest({ method: "thread/archive", params: params });
     }
 
+    async threadUnarchive(params: ThreadUnarchiveParams): Promise<ThreadUnarchiveResponse> {
+        return await this.sendRequest({ method: "thread/unarchive", params: params });
+    }
+
+    async threadDelete(params: ThreadDeleteParams): Promise<ThreadDeleteResponse> {
+        return await this.sendRequest({ method: "thread/delete", params: params });
+    }
+
     async threadUnsubscribe(params: ThreadUnsubscribeParams): Promise<ThreadUnsubscribeResponse> {
         return await this.sendRequest({ method: "thread/unsubscribe", params: params });
     }
@@ -883,27 +883,12 @@ export class CodexAppServerClient {
         return await this.sendRequest({ method: "mcpServerStatus/list", params });
     }
 
-    async mcpServerOauthLogin(params: McpServerOauthLoginParams): Promise<McpServerOauthLoginResponse> {
-        return await this.sendRequest({ method: "mcpServer/oauth/login", params });
+    async mcpServerReload(): Promise<McpServerRefreshResponse> {
+        return await this.sendRequest({ method: "config/mcpServer/reload", params: undefined });
     }
 
-    async awaitMcpServerOauthLoginCompleted(
-        name: string,
-        threadId: string,
-    ): Promise<McpServerOauthLoginCompletedNotification> {
-        return await new Promise((resolve) => {
-            let disposable: {dispose(): void} | undefined;
-            disposable = this.connection.onNotification(
-                "mcpServer/oauthLogin/completed",
-                (event: McpServerOauthLoginCompletedNotification) => {
-                    if (event.name !== name || event.threadId !== threadId) {
-                        return;
-                    }
-                    disposable?.dispose();
-                    resolve(event);
-                },
-            );
-        });
+    async mcpServerOauthLogin(params: McpServerOauthLoginParams): Promise<McpServerOauthLoginResponse> {
+        return await this.sendRequest({ method: "mcpServer/oauth/login", params });
     }
 
     async accountLogin(params: LoginAccountParams): Promise<LoginAccountResponse> {
@@ -922,30 +907,13 @@ export class CodexAppServerClient {
         return await this.sendRequest({ method: "config/read", params: params });
     }
 
-    getMcpServerStartupVersion(): number {
-        return this.mcpServerStartupVersion;
+    async hooksList(params: HooksListParams): Promise<HooksListResponse> {
+        return await this.sendRequest({method: "hooks/list", params});
     }
 
-    async awaitMcpServerStartup(serverNames: Array<string>, afterVersion: number): Promise<McpStartupResult> {
-        const uniqueServerNames = Array.from(new Set(serverNames.map(serverName => serverName.trim()).filter(serverName => serverName.length > 0)));
-        if (uniqueServerNames.length === 0) {
-            return { ready: [], failed: [], cancelled: [] };
-        }
-
-        const result = this.tryBuildMcpStartupResult(uniqueServerNames, afterVersion);
-        if (result !== null) {
-            return result;
-        }
-
-        return await new Promise((resolve) => {
-            this.mcpServerStartupResolvers.push({
-                serverNames: uniqueServerNames,
-                afterVersion,
-                resolve,
-            });
-        });
+    async configBatchWrite(params: ConfigBatchWriteParams): Promise<ConfigWriteResponse> {
+        return await this.sendRequest({method: "config/batchWrite", params});
     }
-
     async accountRead(params: GetAccountParams): Promise<GetAccountResponse> {
         return await this.sendRequest({ method: "account/read", params: params });
     }
@@ -962,6 +930,32 @@ export class CodexAppServerClient {
         return await new Promise((resolve, reject) => {
             const threadResolvers = this.getOrCreatePendingTurnCompletionResolvers(threadId);
             threadResolvers.set(turnId, {resolve, reject});
+        });
+    }
+
+    /**
+     * Waits for `wait`, or rejects with {@link AppServerConnectionLostError} when the connection is lost first.
+     * A JSON-RPC response wait needs no such guard: vscode-jsonrpc rejects it on dispose. A notification wait does.
+     * `release` removes the registration behind `wait`; it runs once the wait ends either way.
+     */
+    waitWhileConnected<T>(what: string, wait: Promise<T>, release: () => void = () => {}): Promise<T> {
+        return new Promise<T>((resolve, reject) => {
+            let ended = false;
+            const end = () => {
+                if (ended) return false;
+                ended = true;
+                removeListener();
+                release();
+                return true;
+            };
+            let removeListener: () => void = () => {};
+            removeListener = this.connectionLoss.onLost(() => {
+                if (end()) reject(new AppServerConnectionLostError(what));
+            });
+            wait.then(
+                value => { if (end()) resolve(value); },
+                error => { if (end()) reject(error); },
+            );
         });
     }
 
@@ -1267,67 +1261,75 @@ export class CodexAppServerClient {
         };
     }
 
-    private resolveMcpServerStartupResolvers(): void {
-        const pendingResolvers: Array<McpServerStartupResolver> = [];
-        for (const resolver of this.mcpServerStartupResolvers) {
-            const result = this.tryBuildMcpStartupResult(resolver.serverNames, resolver.afterVersion);
-            if (result !== null) {
-                resolver.resolve(result);
-            } else {
-                pendingResolvers.push(resolver);
-            }
-        }
-        this.mcpServerStartupResolvers.splice(0, this.mcpServerStartupResolvers.length, ...pendingResolvers);
+    private disposeMcpWaits(): void {
+        this.mcpStartup.dispose();
+        this.mcpOauthCompletions.dispose();
     }
 
-    private tryBuildMcpStartupResult(serverNames: Array<string>, afterVersion: number): McpStartupResult | null {
-        const ready: Array<string> = [];
-        const failed: Array<McpStartupFailure> = [];
-        const cancelled: Array<string> = [];
+    /**
+     * The thread ids of the requests in flight that read a whole rollout into the app-server, with their count.
+     * When the app-server dies, these tell which thread it was opening, see `AppServerRecovery`.
+     */
+    private readonly threadLoads = new Map<string, number>();
 
-        for (const serverName of serverNames) {
-            const state = this.mcpServerStartupStates.get(serverName);
-            if (!state || state.version <= afterVersion) {
-                return null;
-            }
+    /**
+     * Runs each request that reads a whole rollout, see `AppServerRecovery.loadThread`: it can refuse a thread that
+     * crashed the app-server too often, or run such requests one at a time. By default it runs the request at once.
+     */
+    threadLoadGate: <T>(threadId: string, request: () => Promise<T>) => Promise<T> = (_threadId, request) => request();
 
-            switch (state.status) {
-                case "starting":
-                    return null;
-                case "ready":
-                    ready.push(serverName);
-                    break;
-                case "failed":
-                    failed.push({
-                        server: serverName,
-                        error: state.error ?? "unknown MCP startup error",
-                        ...(state.failureReason === null ? {} : {failureReason: state.failureReason}),
-                    });
-                    break;
-                case "cancelled":
-                    cancelled.push(serverName);
-                    break;
-            }
-        }
-
-        return { ready, failed, cancelled };
+    threadLoadsInFlight(): string[] {
+        return [...this.threadLoads.keys()];
     }
 
     private async sendRequest<R>(request: CodexRequest): Promise<R> {
         for (const callback of this.codexEventHandlers) {
             callback({ eventType: "request", ...request});
         }
+        const loadedThreadId = threadLoadOf(request);
         let result: any;
-        if (request.params) {
-            result = await this.connection.sendRequest<R>(request.method, request.params)
-        }
-        else {
-            result = await this.connection.sendRequest<R>(request.method);
+        if (loadedThreadId === null) {
+            if (request.params) {
+                result = await this.connection.sendRequest<R>(request.method, request.params)
+            }
+            else {
+                result = await this.connection.sendRequest<R>(request.method);
+            }
+        } else {
+            result = await this.threadLoadGate(loadedThreadId, () => this.sendThreadLoad<R>(loadedThreadId, request));
         }
         for (const callback of this.codexEventHandlers) {
             callback({ eventType: "response", ...result});
         }
         return result;
+    }
+
+    private async sendThreadLoad<R>(threadId: string, request: CodexRequest): Promise<R> {
+        this.threadLoads.set(threadId, (this.threadLoads.get(threadId) ?? 0) + 1);
+        try {
+            return await this.connection.sendRequest<R>(request.method, (request as {params?: unknown}).params);
+        } finally {
+            const count = (this.threadLoads.get(threadId) ?? 1) - 1;
+            if (count > 0) this.threadLoads.set(threadId, count);
+            else this.threadLoads.delete(threadId);
+        }
+    }
+}
+
+/** The thread whose rollout `request` reads: a resume, a fork (of the source thread) or a history read. */
+function threadLoadOf(request: CodexRequest): string | null {
+    const params = (request as {params?: unknown}).params as {threadId?: unknown, includeTurns?: unknown} | undefined;
+    if (typeof params?.threadId !== "string") return null;
+    switch (request.method) {
+        case "thread/resume":
+        case "thread/fork":
+        case "thread/turns/list":
+        case "thread/items/list":
+            return params.threadId;
+        case "thread/read":
+            return params.includeTurns === true ? params.threadId : null;
+        default:
+            return null;
     }
 }
 
@@ -1353,19 +1355,6 @@ export interface ExperimentalThreadSettingsUpdateParams {
         };
     };
 }
-
-type McpServerStartupSnapshot = {
-    status: McpServerStartupState;
-    error: string | null;
-    failureReason: McpServerStartupFailureReason | null;
-    version: number;
-};
-
-type McpServerStartupResolver = {
-    serverNames: Array<string>;
-    afterVersion: number;
-    resolve: (result: McpStartupResult) => void;
-};
 
 function isMcpServerStatusUpdatedNotification(notification: ServerNotification): notification is {
     method: "mcpServer/startupStatus/updated";
@@ -1441,8 +1430,11 @@ const HISTORY_PAGE_TURNS = 5;
 const HISTORY_PAGE_ITEMS = 100;
 
 /**
- * The longest wait for one page of history. A page takes milliseconds, so a page that takes this long is lost:
- * the load fails and the session closes instead of waiting forever.
+ * The pages of a history list, from the first page. A page request fails when Codex does not answer
+ * within {@link HISTORY_PAGE_TIMEOUT_MS}. The read fails when Codex returns a cursor a second time.
+ *
+ * With `endsHistory`, the next page is requested while the caller uses a page, so at most two pages are in memory.
+ * No page is requested after the page that `endsHistory` accepts. Without it, a page is requested when the caller asks.
  */
 const HISTORY_PAGE_TIMEOUT_MS = 60_000;
 
@@ -1455,18 +1447,30 @@ async function* historyPages<T>(
     threadId: string,
     method: string,
     requestPage: (cursor: string | null) => Promise<{data: T[]; nextCursor: string | null}>,
+    endsHistory?: (page: T[]) => boolean,
 ): AsyncGenerator<T[]> {
+    type Page = {data: T[]; nextCursor: string | null};
+    const request = (cursor: string | null): Promise<Page> => {
+        const page = withHistoryTimeout(requestPage(cursor), method, threadId);
+        // A caller that stops early never reads the next page. Its failure is not an unhandled rejection.
+        page.catch(() => {});
+        return page;
+    };
     const seenCursors = new Set<string>();
     let cursor: string | null = null;
+    let next: Promise<Page> | null = null;
     do {
-        const page: {data: T[]; nextCursor: string | null} = await withHistoryTimeout(requestPage(cursor), method, threadId);
-        yield page.data;
+        const page: Page = await (next ?? request(cursor));
+        next = null;
         cursor = page.nextCursor;
-        if (cursor !== null) {
-            if (seenCursors.has(cursor)) {
-                throw new Error("Codex returned a repeated thread history cursor");
-            }
+        const repeated = cursor !== null && seenCursors.has(cursor);
+        if (cursor !== null && !repeated) {
             seenCursors.add(cursor);
+            if (endsHistory && !endsHistory(page.data)) next = request(cursor);
+        }
+        yield page.data;
+        if (repeated) {
+            throw new Error("Codex returned a repeated thread history cursor");
         }
     } while (cursor !== null);
 }

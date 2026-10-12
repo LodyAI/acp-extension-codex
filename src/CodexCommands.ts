@@ -1,7 +1,8 @@
-import {AIR_COMMAND_ACTION_KEY, withAirMeta} from "./AirExtension";
+import {withAirMeta} from "./AirExtension";
 import type * as acp from "@agentclientprotocol/sdk";
 import {RequestError, type AvailableCommand} from "@agentclientprotocol/sdk";
 import {ACPSessionConnection, type AcpClientConnection} from "./ACPSessionConnection";
+import {AIR_COMMAND_ACTION_KEY, AIR_SKILL_PATH_KEY, airOnlyMeta} from "./AirExtension";
 import type {CodexAcpClient} from "./CodexAcpClient";
 import type {
     RateLimitSnapshot,
@@ -14,6 +15,8 @@ import type {SessionState} from "./CodexAcpServer";
 import {createRateLimitsMap, type RateLimitsMap} from "./RateLimitsMap";
 import type {TokenCount} from "./TokenCount";
 import {logger} from "./Logger";
+import {MCP_COMMAND_INPUT_HINT, McpCommand} from "./mcp/McpCommand";
+import type {McpServerSignIn} from "./mcp/McpServerSignIn";
 import {createAgentTextMessageChunk} from "./ContentChunks";
 import {
     LODY_PLAN_MODE_CONFIG_ID,
@@ -57,6 +60,8 @@ export function resolveGoalCommandHandleResult(
 }
 
 export type CommandHandleOptions = {
+    /** Aborts when the prompt ends. A command then sends no more updates. */
+    signal?: AbortSignal;
     onTurnStartPending?: () => void;
     onTurnStarted?: (turnId: string, threadId: string) => void;
     onCommandAccepted?: () => void;
@@ -73,17 +78,22 @@ export class CodexCommands {
     private readonly codexAcpClient: CodexAcpClient;
     private readonly runWithProcessCheck: <T>(operation: () => Promise<T>) => Promise<T>;
     private readonly onLogout: LogoutHandler;
+    private readonly mcpCommand: McpCommand;
+    /** The commands that each session got last, to skip a publish that changes nothing. */
+    private readonly published = new WeakMap<SessionState, string>();
 
     constructor(
         connection: AcpClientConnection,
         codexAcpClient: CodexAcpClient,
         runWithProcessCheck: <T>(operation: () => Promise<T>) => Promise<T>,
-        onLogout: LogoutHandler = () => {}
+        onLogout: LogoutHandler,
+        mcpServerSignIn: McpServerSignIn,
     ) {
         this.connection = connection;
         this.codexAcpClient = codexAcpClient;
         this.runWithProcessCheck = runWithProcessCheck;
         this.onLogout = onLogout;
+        this.mcpCommand = new McpCommand(codexAcpClient, runWithProcessCheck, mcpServerSignIn);
     }
 
     classifyPrompt(prompt: acp.ContentBlock[]): PromptKind {
@@ -158,7 +168,7 @@ export class CodexCommands {
         } catch (err) {
             logger.error(`Failed to resolve available commands for session ${sessionState.sessionId}`, err);
         }
-        const commands = this.buildAvailableCommands(skillsEntries);
+        const commands = this.buildAvailableCommands(skillsEntries, sessionState.clientCapabilities.airClient);
         if (sessionState.clientCapabilities.airClient) {
             for (const command of commands) {
                 const action = command._meta?.["commandAction"];
@@ -174,7 +184,7 @@ export class CodexCommands {
         };
     }
 
-    private buildAvailableCommands(skillsEntries: SkillsListEntry[]): AvailableCommand[] {
+    private buildAvailableCommands(skillsEntries: SkillsListEntry[], airClient: boolean): AvailableCommand[] {
         const commands = new Map<string, AvailableCommand>();
 
         for (const builtin of this.getBuiltinCommands()) {
@@ -186,10 +196,13 @@ export class CodexCommands {
                 const name = `$${skill.name}`;
                 if (commands.has(name)) continue;
                 const description = skill.shortDescription ?? skill.description ?? skill.name;
+                // Only AIR gets the SKILL.md path, in `_meta.jetbrains.air.skillPath`. A click on the skill chip opens it.
+                const meta = airOnlyMeta(airClient, AIR_SKILL_PATH_KEY, skill.path);
                 commands.set(name, {
                     name,
                     description,
                     input: null,
+                    ...(meta ? {_meta: meta} : {}),
                 });
             }
         }
@@ -218,8 +231,8 @@ export class CodexCommands {
             },
             {
                 name: "mcp",
-                description: "List configured Model Context Protocol (MCP) tools.",
-                input: null
+                description: "Show the status of the MCP servers, or reconnect them.",
+                input: { hint: MCP_COMMAND_INPUT_HINT }
             },
             {
                 name: "skills",
@@ -380,6 +393,8 @@ export class CodexCommands {
                     await this.sendCommandUsageMessage(commandName, "new name", sessionId);
                     return { handled: true };
                 }
+                // The new name replaces a `_session/rename` title, so its echo must be shown.
+                delete sessionState.sessionIndexExplicitTitle;
                 await this.runWithProcessCheck(() => this.codexAcpClient.renameSession(sessionId, command.rest));
                 return { handled: true };
             }
@@ -403,20 +418,12 @@ export class CodexCommands {
                 return { handled: true };
             }
             case "mcp": {
-                const servers = await this.runWithProcessCheck(() => this.codexAcpClient.listMcpServers());
-                const configuredServers = servers.data.map(server => {
-                    const toolCount = Object.keys(server.tools ?? {}).length;
-                    const resourceCount = (server.resources ?? []).length;
-                    return `- ${server.name}: ${toolCount} tools, ${resourceCount} resources, auth=${server.authStatus}`;
-                });
-                const sessionServers = sessionState.sessionMcpServers
-                    ? sessionState.sessionMcpServers.map(serverName => `- ${serverName}`)
-                    : [];
-                const lines = [...configuredServers, ...sessionServers];
-                const text = lines.length > 0
-                    ? ["Configured MCP servers:", ...lines].join("\n")
-                    : "No MCP servers configured.";
-                await this.sendCommandMessage(text, sessionId);
+                const text = await this.mcpCommand.run(command.rest, sessionState, options.signal);
+                if (text === null) {
+                    return { handled: true };
+                }
+                const session = new ACPSessionConnection(this.connection, sessionId);
+                await session.update(createAgentTextMessageChunk(text));
                 return { handled: true };
             }
             default:
@@ -521,6 +528,7 @@ export class CodexCommands {
                 ? this.codexAcpClient.setGoal(sessionId, control.objective.trim(), onTurnStarted, undefined, options.onCommandAccepted)
                 : this.codexAcpClient.resumeGoal(sessionId, onTurnStarted, undefined, options.onCommandAccepted),
         ));
+
     }
 
     private handleCommandTurnStarted(
@@ -537,7 +545,6 @@ export class CodexCommands {
     }
 
     private createGoalCommandResult(sessionId: string, turnCompleted: TurnCompletedNotification | null): CommandHandleResult {
-        if (new ACPSessionConnection(this.connection, sessionId).protocolVersion === 2 && turnCompleted === null) return {handled: true};
         return resolveGoalCommandHandleResult(turnCompleted);
     }
 
@@ -620,7 +627,10 @@ export class CodexCommands {
         const input = this.formatTokenCount(usage.inputTokens);
         const cachedInput = this.formatTokenCount(usage.cachedInputTokens);
         const output = this.formatTokenCount(usage.outputTokens);
-        return `${total} total  (${input} input + ${cachedInput} cached input, ${output} output)`;
+        const cacheWrite = usage.cacheWriteInputTokens > 0
+            ? ` + ${this.formatTokenCount(usage.cacheWriteInputTokens)} cache write`
+            : "";
+        return `${total} total  (${input} input + ${cachedInput} cached input${cacheWrite}, ${output} output)`;
     }
 
     private formatContextWindow(usage: TokenCount | null, contextWindow: number | null): string {

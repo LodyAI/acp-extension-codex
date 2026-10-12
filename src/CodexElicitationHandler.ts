@@ -28,6 +28,7 @@ import type {PermissionPromptContext} from "./permissions/lifecycle";
 import {AcpToolCallRenderer} from "./tool-calls/AcpToolCallRenderer";
 import {ElicitationReporter} from "./tool-calls/reporters/ElicitationReporter";
 import {isRecord, normalizeJsonObject, normalizeJsonValue, recordOrNull} from "./permissions/json";
+import {AIR_CUSTOM_ANSWER_KEY, LEGACY_AIR_CUSTOM_ANSWER_KEY, isAirClient, withAirMeta} from "./AirExtension";
 type AcpBackedMcpElicitationParams = Extract<
     McpServerElicitationRequestParams,
     { mode: "form" } | { mode: "url" }
@@ -126,6 +127,17 @@ function userInputNoteFieldId(questionId: string, questionIds: ReadonlySet<strin
         fieldId = `${base}${index++}`;
     }
     return fieldId;
+}
+
+/** The text that AIR sends in a choice field when the user types an own answer instead of choosing an option. */
+function typedChoiceAnswer(
+    value: acp.ElicitationContentValue | undefined,
+    question: ToolRequestUserInputParams["questions"][number],
+): string | undefined {
+    if (typeof value !== "string" || value === USER_INPUT_OTHER_OPTION) {
+        return undefined;
+    }
+    return question.options?.some(option => option.label === value) ? undefined : value;
 }
 
 function userInputResponseValue(
@@ -400,12 +412,13 @@ export class CodexElicitationHandler implements ElicitationHandler {
         const properties: Record<string, acp.ElicitationPropertySchema> = {};
         const required: string[] = [];
         const questionIds = new Set(params.questions.map(question => question.id));
+        const airClient = isAirClient(this.clientCapabilities);
 
         for (const question of params.questions) {
             const options = question.options ?? [];
             const hasOptions = options.length > 0;
             const hasOtherAnswer = question.isOther && hasOptions;
-            if (!hasOtherAnswer || answerNotes) required.push(question.id);
+            if (!hasOtherAnswer || answerNotes || airClient) required.push(question.id);
             properties[question.id] = {
                 // Core v1 consumers use title as the short header and description
                 // as the question. Keep that presentation contract at the boundary.
@@ -420,7 +433,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
                             title: option.label,
                             ...(option.description ? { description: option.description } : {}),
                         })),
-                        ...(answerNotes && hasOtherAnswer && !options.some(option => option.label === USER_INPUT_OTHER_OPTION) ? [{
+                        ...(answerNotes && hasOtherAnswer && !airClient && !options.some(option => option.label === USER_INPUT_OTHER_OPTION) ? [{
                             const: USER_INPUT_OTHER_OPTION,
                             title: USER_INPUT_OTHER_OPTION,
                             description: "Provide a different answer in the note field.",
@@ -429,16 +442,23 @@ export class CodexElicitationHandler implements ElicitationHandler {
                 } : {}),
             };
             if (hasOtherAnswer) {
+                const noteMeta = {
+                    codex: {
+                        questionId: question.id,
+                        role: "user_note",
+                        isSecret: question.isSecret,
+                    },
+                };
                 properties[userInputNoteFieldId(question.id, questionIds)] = {
                     type: "string",
-                    title: answerNotes ? "Additional answer or note" : "Other",
+                    title: answerNotes || airClient ? "Additional answer or note" : "Other",
                     description: answerNotes
                         ? "Optionally add context to your selected answer."
                         : "Type your own answer instead of choosing an option above.",
-                    _meta: lodyElicitationMeta({
+                    _meta: {...(airClient ? withAirMeta({...noteMeta, [LEGACY_AIR_CUSTOM_ANSWER_KEY]: true}, AIR_CUSTOM_ANSWER_KEY, true) : {}), ...lodyElicitationMeta({
                         ...(answerNotes ? {noteFor: question.id} : {customAnswerFor: question.id}),
                         secret: question.isSecret,
-                    }),
+                    })},
                 };
             }
         }
@@ -520,13 +540,18 @@ export class CodexElicitationHandler implements ElicitationHandler {
         const answerNotes = clientSupportsElicitationAnswerNotes(this.clientCapabilities);
         const content = contentRecord(response.content);
         const questionIds = new Set(params.questions.map(question => question.id));
+        const airClient = isAirClient(this.clientCapabilities);
         for (const question of params.questions) {
             const answerValues: string[] = [];
+            const hasOtherAnswer = question.isOther && question.options != null && question.options.length > 0;
             const value = userInputResponseValue(content, question.id);
-            if (value !== undefined) {
+            const typedAnswer = airClient && hasOtherAnswer ? typedChoiceAnswer(value, question) : undefined;
+            if (typedAnswer !== undefined) {
+                answerValues.push(USER_INPUT_OTHER_OPTION, `${USER_INPUT_NOTE_PREFIX}${typedAnswer.trim()}`);
+            } else if (value !== undefined) {
                 answerValues.push(...(Array.isArray(value) ? value.map(String) : [String(value)]));
             }
-            if (question.isOther && question.options != null && question.options.length > 0) {
+            if (hasOtherAnswer) {
                 const note = userInputResponseValue(content, userInputNoteFieldId(question.id, questionIds));
                 if (answerNotes) {
                     // A note accompanies a choice; never invent or replace that
@@ -565,6 +590,16 @@ export class CodexElicitationHandler implements ElicitationHandler {
             sessionId,
             update: this.renderer.render(ElicitationReporter.accepted(context.correlatedCallId)),
         });
+    }
+
+    /**
+     * Completes every accepted URL elicitation: the app-server died and will never resolve them, so the client must
+     * not keep their flow open.
+     */
+    async completeAllUrlElicitations(): Promise<void> {
+        for (const threadId of [...this.pendingUrlElicitations.keys()]) {
+            await this.completeUrlElicitations(threadId);
+        }
     }
 
     private trackUrlElicitation(threadId: string, elicitationId: string): void {

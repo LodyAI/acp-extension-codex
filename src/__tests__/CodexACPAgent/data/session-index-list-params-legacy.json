@@ -1,0 +1,34 @@
+{
+  "airWithoutSessionIndex": {
+    "cursor": "cursor-1",
+    "limit": 100,
+    "sortKey": "updated_at",
+    "sortDirection": "desc",
+    "modelProviders": [],
+    "sourceKinds": [
+      "cli",
+      "vscode",
+      "exec",
+      "appServer",
+      "unknown"
+    ],
+    "cwd": "/repo/project",
+    "useStateDbOnly": true
+  },
+  "plain": {
+    "cursor": "cursor-1",
+    "limit": 100,
+    "sortKey": "updated_at",
+    "sortDirection": "desc",
+    "modelProviders": [],
+    "sourceKinds": [
+      "cli",
+      "vscode",
+      "exec",
+      "appServer",
+      "unknown"
+    ],
+    "cwd": "/repo/project",
+    "useStateDbOnly": true
+  }
+}

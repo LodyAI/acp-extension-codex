@@ -16,6 +16,7 @@ export const AIR_DIFF_STATS_KEY = "diffStats";
 export const AIR_DIFF_PATCH_KEY = "diffPatch";
 export const AIR_SESSION_FAILURE_KEY = "sessionFailure";
 export const AIR_AGENT_FILE_CHANGE_REPORT_KEY = "agentFileChangeReport";
+export const AIR_CUSTOM_INSTRUCTIONS_KEY = "customInstructions";
 export const AIR_NATIVE_SUBAGENT_SESSIONS_KEY = "nativeSubagentSessions";
 export const AIR_ASYNC_TASKS_KEY = "asyncTasks";
 export const AIR_RECOMMENDED_CONFIG_VALUE_KEY = "recommendedValue";
@@ -25,12 +26,20 @@ export const AIR_MESSAGE_PHASE_KEY = "phase";
 export const AIR_GOAL_KEY = "goal";
 export const AIR_KIND_KEY = "kind";
 export const AIR_COMMAND_ACTION_KEY = "commandAction";
+export const AIR_SKILL_PATH_KEY = "skillPath";
 export const AIR_PERMISSION_KEY = "permission";
 export const AIR_CONTEXT_COMPACTION_KEY = "contextCompaction";
 export const AIR_RAW_INPUT_RENDERING_KEY = "rawInputRendering";
 export const AIR_PLAN_CONTENT_DELTA_KEY = "planContentDelta";
+export const AIR_CODEX_HOOKS_KEY = "codexHooks";
 export const AIR_CONTENT_DELTA_KEY = "contentDelta";
 export const AIR_SUBAGENT_KEY = "subagent";
+export const AIR_CUSTOM_ANSWER_KEY = "customAnswer";
+/**
+ * The root `_meta` spelling of {@link AIR_CUSTOM_ANSWER_KEY} that released AIR versions read.
+ * Remove it when the ACP registry no longer serves AIR versions that read only this spelling.
+ */
+export const LEGACY_AIR_CUSTOM_ANSWER_KEY = "_askUserQuestionCustomAnswer";
 export const AIR_EXTENSION_VERSION = 1;
 
 /** Merge one AIR payload into metadata while preserving other object namespaces. */
@@ -88,6 +97,15 @@ export function clientSupportsAirCapability(
         && version >= AIR_EXTENSION_VERSION
         && Array.isArray(supported)
         && supported.includes(capability);
+}
+
+/** Read custom instructions from `session/new` metadata. */
+export function airCustomInstructions(meta: unknown): string | undefined {
+    const root = asRecord(meta);
+    const jetbrains = asRecord(root[JETBRAINS_META_KEY]);
+    const air = asRecord(jetbrains[AIR_META_KEY]);
+    const instructions = air[AIR_CUSTOM_INSTRUCTIONS_KEY];
+    return typeof instructions === "string" ? instructions : undefined;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

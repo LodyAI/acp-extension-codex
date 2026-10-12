@@ -2,7 +2,7 @@ import {describe, expect, it, vi} from "vitest";
 import type {McpServerStdio} from "@agentclientprotocol/sdk";
 import {forkSession} from "../../SessionFork";
 import {createCodexMockTestFixture, createTestModel} from "../acp-test-utils";
-import type {McpStartupResult} from "../../CodexAppServerClient";
+import type {McpStartupResult} from "../../mcp/McpStartupTracker";
 
 describe("ACP session fork", () => {
     it("maps the Lody turn fork point to thread/fork", async () => {
@@ -50,6 +50,7 @@ describe("ACP session fork", () => {
 
         expect(result).toEqual({
             sessionId: "child-session-id",
+            skippedMcpServers: [],
             currentModelId: "model-id[medium]",
             models: [model],
             collaborationMode: "default",
@@ -102,6 +103,7 @@ describe("ACP session fork", () => {
                         }),
                         threadUnsubscribe,
                     } as never,
+                    releaseFailedFork: async threadId => { await threadUnsubscribe({threadId}); },
                     backfillProject: vi.fn().mockRejectedValue(backfillError),
                     refreshSkills: vi.fn().mockResolvedValue(undefined),
                     createSessionConfig: vi.fn().mockResolvedValue({}),
@@ -122,7 +124,7 @@ describe("ACP session fork", () => {
         const client = fixture.getCodexAcpClient();
         const model = createTestModel({id: "gpt-5"});
 
-        vi.spyOn(client, "authRequired").mockResolvedValue(false);
+        vi.spyOn(client, "readAuthRequirement").mockResolvedValue({required: false, account: null});
         vi.spyOn(client, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
         vi.spyOn(client, "listSkills").mockResolvedValue({data: []});
         const forkSpy = vi.spyOn(client, "forkSession").mockResolvedValue({
@@ -133,6 +135,7 @@ describe("ACP session fork", () => {
             modelProvider: "openai",
             currentServiceTier: null,
             additionalDirectories: [],
+            skippedMcpServers: [],
         });
 
         const response = await agent.forkSession({
@@ -153,9 +156,7 @@ describe("ACP session fork", () => {
             sessionId: "source-id",
             cwd: "/workspace",
             mcpServers: [],
-        });
-        // Regression pin: v1 must keep sending `modes` (v2 drops it via `forkSessionV2`).
-        expect(response.modes).toBeDefined();
+        }, expect.any(Function));
     });
 
     it("waits for MCP startup before completing session fork", async () => {
@@ -164,7 +165,7 @@ describe("ACP session fork", () => {
         const client = fixture.getCodexAcpClient();
         const mcpStartup = deferred<McpStartupResult>();
 
-        vi.spyOn(client, "authRequired").mockResolvedValue(false);
+        vi.spyOn(client, "readAuthRequirement").mockResolvedValue({required: false, account: null});
         vi.spyOn(client, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
         vi.spyOn(client, "listSkills").mockResolvedValue({data: []});
         vi.spyOn(client, "forkSession").mockResolvedValue({
@@ -174,6 +175,7 @@ describe("ACP session fork", () => {
             collaborationMode: "default",
             currentServiceTier: null,
             additionalDirectories: [],
+            skippedMcpServers: [],
         });
         const awaitMcpStartupSpy = vi.spyOn(client, "awaitMcpServerStartup")
             .mockReturnValue(mcpStartup.promise);
@@ -191,12 +193,40 @@ describe("ACP session fork", () => {
         );
 
         await vi.waitFor(() => {
-            expect(awaitMcpStartupSpy).toHaveBeenCalledWith(["fork-mcp"], expect.any(Number));
+            expect(awaitMcpStartupSpy).toHaveBeenCalledWith(["fork-mcp"], expect.any(Number), {threadId: "fork-id", signal: expect.any(AbortSignal)});
         });
         expect(forkSettled).toBe(false);
 
         mcpStartup.resolve({ready: ["fork-mcp"], failed: [], cancelled: []});
         await expect(forkPromise).resolves.toMatchObject({sessionId: "fork-id", modes: expect.any(Object)});
+    });
+
+    it("leaves no MCP startup wait after a fork without the startup wait", async () => {
+        const fixture = createCodexMockTestFixture();
+        const agent = fixture.getCodexAcpAgent();
+        const client = fixture.getCodexAcpClient();
+
+        vi.spyOn(client, "readAuthRequirement").mockResolvedValue({required: false, account: null});
+        vi.spyOn(client, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        vi.spyOn(client, "listSkills").mockResolvedValue({data: []});
+        vi.spyOn(client, "forkSession").mockResolvedValue({
+            sessionId: "fork-id",
+            currentModelId: "gpt-5[medium]",
+            models: [createTestModel({id: "gpt-5"})],
+            collaborationMode: "default",
+            currentServiceTier: null,
+            additionalDirectories: [],
+            skippedMcpServers: [],
+        });
+
+        await agent.forkSession({
+            sessionId: "source-id",
+            cwd: "/workspace",
+            mcpServers: [{name: "fork-mcp", command: "npx", args: ["fork"], env: []}],
+        });
+
+        const tracker = client.appServerClient.mcpStartup as unknown as {waiters: unknown[]};
+        expect(tracker.waiters).toHaveLength(0);
     });
 });
 

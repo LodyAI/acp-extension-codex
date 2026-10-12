@@ -13,7 +13,7 @@ describe("New session logout handling", () => {
         const codexAcpAgent = fixture.getCodexAcpAgent();
         const codexAcpClient = fixture.getCodexAcpClient();
         const codexAppServerClient = fixture.getCodexAppServerClient();
-        vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
+        vi.spyOn(codexAcpClient, "readAuthRequirement").mockResolvedValue({required: false, account: null});
         const logoutSpy = vi.spyOn(codexAcpClient, "logout").mockResolvedValue();
         vi.spyOn(codexAppServerClient, "threadStart").mockRejectedValue(new Error(error));
 
@@ -29,7 +29,7 @@ describe("New session logout handling", () => {
     it("does not mark other refresh failures as contention", async () => {
         const fixture = createCodexMockTestFixture(undefined, undefined, true);
         const codexAcpAgent = fixture.getCodexAcpAgent();
-        vi.spyOn(fixture.getCodexAcpClient(), "authRequired").mockResolvedValue(false);
+        vi.spyOn(fixture.getCodexAcpClient(), "readAuthRequirement").mockResolvedValue({required: false, account: null});
         vi.spyOn(fixture.getCodexAppServerClient(), "threadStart").mockRejectedValue(
             new Error("Your access token could not be refreshed because the account was revoked. Please log out and sign in again.")
         );
@@ -44,7 +44,7 @@ describe("New session logout handling", () => {
         const codexAcpAgent = fixture.getCodexAcpAgent();
         const codexAcpClient = fixture.getCodexAcpClient();
         const codexAppServerClient = fixture.getCodexAppServerClient();
-        vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
+        vi.spyOn(codexAcpClient, "readAuthRequirement").mockResolvedValue({required: false, account: null});
 
         const errorMessage = `Internal error: "failed to reload config: Your access token could not be refreshed because your refresh token was already used. Please log out and sign in again."`;
         vi.spyOn(codexAppServerClient, "threadStart").mockRejectedValue(new Error(errorMessage));
@@ -63,7 +63,7 @@ describe("New session logout handling", () => {
         const codexAcpAgent = fixture.getCodexAcpAgent();
         const codexAcpClient = fixture.getCodexAcpClient();
         const codexAppServerClient = fixture.getCodexAppServerClient();
-        vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
+        vi.spyOn(codexAcpClient, "readAuthRequirement").mockResolvedValue({required: false, account: null});
 
         const errorMessage = `Internal error: "failed to reload config: Failed to load cloud requirements (workspace-managed policies)."`;
         vi.spyOn(codexAppServerClient, "threadStart").mockRejectedValue(new Error(errorMessage));
@@ -82,7 +82,7 @@ describe("New session logout handling", () => {
         const codexAcpAgent = fixture.getCodexAcpAgent();
         const codexAcpClient = fixture.getCodexAcpClient();
         const codexAppServerClient = fixture.getCodexAppServerClient();
-        vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
+        vi.spyOn(codexAcpClient, "readAuthRequirement").mockResolvedValue({required: false, account: null});
         const logoutSpy = vi.spyOn(codexAcpClient, "logout").mockResolvedValue();
 
         const errorMessage = 'Internal error: "failed to reload config: filesystem path `/tmp` must be absolute, use `~/...`, or start with `:`"';
@@ -101,7 +101,7 @@ describe("New session logout handling", () => {
         const codexAcpClient = fixture.getCodexAcpClient();
         const model = createTestModel();
         const currentModelId = ModelId.create(model.id, model.defaultReasoningEffort).toString();
-        vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
+        vi.spyOn(codexAcpClient, "readAuthRequirement").mockResolvedValue({required: false, account: null});
         const getAccountSpy = vi.spyOn(codexAcpClient, "getAccount")
             .mockResolvedValueOnce({
                 account: { type: "apiKey" },
@@ -163,7 +163,7 @@ describe("Session open failure diagnostics", () => {
         const fixture = createCodexMockTestFixture();
         const agent = fixture.getCodexAcpAgent();
         const codexAcpClient = fixture.getCodexAcpClient();
-        vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
+        vi.spyOn(codexAcpClient, "readAuthRequirement").mockResolvedValue({required: false, account: null});
         const logoutSpy = vi.spyOn(codexAcpClient, "logout").mockResolvedValue();
         vi.spyOn(fixture.getCodexAppServerClient(), "threadStart")
             .mockRejectedValue(new ResponseError(-32603, routingText));
@@ -201,16 +201,11 @@ describe("Session open failure diagnostics", () => {
             appServerMethod: "threadResume",
             open: agent => agent.loadSession({sessionId: "existing", cwd: "/workspace", mcpServers: []}),
         },
-        {
-            name: "v2 resume with replayFrom start",
-            appServerMethod: "threadResume",
-            open: agent => agent.resumeSessionV2({sessionId: "existing", cwd: "/workspace", mcpServers: [], replayFrom: {type: "start"}}),
-        },
     ])("maps a workspace routing timeout with the same hint on $name", async ({open, appServerMethod}) => {
         const fixture = createCodexMockTestFixture();
         const agent = fixture.getCodexAcpAgent();
         const codexAcpClient = fixture.getCodexAcpClient();
-        vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
+        vi.spyOn(codexAcpClient, "readAuthRequirement").mockResolvedValue({required: false, account: null});
         const logoutSpy = vi.spyOn(codexAcpClient, "logout").mockResolvedValue();
         vi.spyOn(fixture.getCodexAppServerClient(), appServerMethod)
             .mockRejectedValue(new ResponseError(-32603, "workspace routing discovery timed out"));
@@ -229,7 +224,7 @@ describe("Session open failure diagnostics", () => {
         const fixture = createCodexMockTestFixture();
         const agent = fixture.getCodexAcpAgent();
         const codexAcpClient = fixture.getCodexAcpClient();
-        vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
+        vi.spyOn(codexAcpClient, "readAuthRequirement").mockResolvedValue({required: false, account: null});
         const nativeError = new ResponseError(-32603, "thread storage is corrupted");
         vi.spyOn(fixture.getCodexAppServerClient(), "threadStart").mockRejectedValue(nativeError);
 

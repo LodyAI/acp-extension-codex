@@ -21,7 +21,7 @@ Use [OpenAI Codex](https://github.com/openai/codex) from [Agent Client Protocol]
 - Client-provided MCP servers over command-based stdio config and HTTP transport.
 - Native ACP session forking through Codex App Server `thread/fork`.
 - Acknowledged steering of an active Codex turn through app-server `turn/steer`.
-- Slash commands: `/status`, `/mcp`, `/skills`, `/goal`, `/review`, `/review-branch`, `/review-commit`, `/compact`, and `/logout`, as well as configured skills.
+- Slash commands: `/status`, `/mcp` (with `/mcp reconnect`), `/skills`, `/goal`, `/review`, `/review-branch`, `/review-commit`, `/compact`, and `/logout`, as well as configured skills.
 
 ## Installation
 
