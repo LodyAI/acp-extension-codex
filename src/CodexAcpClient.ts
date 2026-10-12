@@ -10,13 +10,13 @@ import {
 } from "./CodexAuthMethod";
 import type {EmbeddedResourceResource} from "@agentclientprotocol/sdk";
 import * as acp from "@agentclientprotocol/sdk";
-import {RequestError} from "@agentclientprotocol/sdk";
+import {type McpServer, RequestError} from "@agentclientprotocol/sdk";
 import type {
     ApprovalHandler,
     CodexAppServerClient,
     ElicitationHandler,
-    McpStartupResult,
 } from "./CodexAppServerClient";
+import type {McpServerStartupWaitOptions, McpStartupResult} from "./mcp/McpStartupTracker";
 import open from "open";
 import type {Disposable} from "vscode-jsonrpc";
 import type {
@@ -30,13 +30,15 @@ import {ModelId} from "./ModelId";
 import {AgentMode} from "./AgentMode";
 import path from "node:path";
 import {logger} from "./Logger";
+import {isAccountReadAuthFailureError, isAccountReadUnavailableError} from "./CodexThreadErrors";
 import {sanitizeMcpServerName} from "./McpServerName";
-import {type AcpMcpServer, type WithAcpMcpServers, getMcpServerName, normalizeMcpServer, toCodexMcpServerConfig} from "./McpServerConfig";
+import {listedSessionTitle} from "./SessionTitle";
 import type {
     AccountLoginCompletedNotification,
     AccountUpdatedNotification,
     GetAccountRateLimitsResponse,
     GetAccountResponse,
+    ListMcpServerStatusParams,
     ListMcpServerStatusResponse,
     McpServerOauthLoginCompletedNotification,
     McpServerOauthLoginParams,
@@ -52,7 +54,6 @@ import type {
     ThreadResumeParams,
     ThreadSourceKind,
     ThreadItem,
-    ThreadItemEntry,
     TurnCompletedNotification,
     TurnStartParams,
     TurnSteerResponse,
@@ -66,7 +67,13 @@ import {arePathBasenamesEqual, arePathsEqual, isAbsolutePathLike} from "./PathUt
 import {CodexSubagentSubscriptions} from "./subagents/CodexSubagentSubscriptions";
 import {forkSession as runForkSession} from "./SessionFork";
 import type {SessionMetadata, SessionMetadataWithThread} from "./SessionMetadata";
-import {isMissingRolloutError, isUnknownThreadError} from "./CodexThreadErrors";
+import {
+    isMissingRolloutError,
+    isThreadActiveWriterError,
+    isUnknownThreadError,
+    threadActiveWriterRequestError,
+} from "./CodexThreadErrors";
+import {airCustomInstructions} from "./AirExtension";
 export type {SessionMetadata, SessionMetadataWithThread} from "./SessionMetadata";
 
 /**
@@ -106,6 +113,14 @@ export type CreateUrlElicitationRequest = Extract<acp.CreateElicitationRequest, 
  * supplies the rest (`mode`, `requestId`) when sending `elicitation/create`.
  */
 export type UrlElicitationRequest = Omit<CreateUrlElicitationRequest, "mode" | "requestId">;
+
+/** The answer of {@link CodexAcpClient.readAuthRequirement}. */
+export interface AuthRequirement {
+    /** Whether the agent needs a login before it opens a session. */
+    required: boolean;
+    /** The account read that gave the answer, or `null` when the adapter did not read the account. */
+    account: GetAccountResponse | null;
+}
 
 export interface UrlElicitationRequester {
     elicitUrl(request: UrlElicitationRequest): Promise<acp.CreateElicitationResponse>;
@@ -158,11 +173,27 @@ export class CodexAcpClient {
         return this.codexClient;
     }
 
+    /**
+     * A client of the same configuration for another app-server: the same config and model provider. The routing
+     * that the agent set at runtime (gateway auth, `providers/set`) is copied by {@link adoptRoutingFrom}.
+     */
+    withAppServer(codexClient: CodexAppServerClient): CodexAcpClient {
+        const client = new CodexAcpClient(codexClient, this.config, this.modelProvider ?? undefined);
+        client.adoptRoutingFrom(this);
+        return client;
+    }
+
+    /** Takes the runtime routing of `previous`, the client that this client replaces. */
+    adoptRoutingFrom(previous: CodexAcpClient): void {
+        this.gatewayConfig = previous.gatewayConfig;
+        this.gatewayConfigSource = previous.gatewayConfigSource;
+    }
+
     private readonly defaultClientInfo: ClientInfo = {
         name: `${packageJson.name}`, title: "Codex ACP", version: `${packageJson.version}`
     };
 
-    async initialize(request: Pick<acp.InitializeRequest, "clientInfo">): Promise<void> {
+    async initialize(request: acp.InitializeRequest): Promise<void> {
         const response = await this.codexClient.initialize({
             capabilities: {
                 experimentalApi: true,
@@ -175,6 +206,14 @@ export class CodexAcpClient {
             }
         });
         this.configPath = response?.codexHome ?? null;
+        this.isInitialized = true;
+    }
+
+    private isInitialized = false;
+
+    /** The app-server `initialize` handshake of this client succeeded. */
+    get initialized(): boolean {
+        return this.isInitialized;
     }
 
     getHomePath(): string | null {
@@ -205,6 +244,7 @@ export class CodexAcpClient {
     private async authenticateWithApiKey(authRequest: ApiKeyAuthRequest): Promise<Boolean> {
         const apiKey = authRequest._meta?.["api-key"]?.apiKey ?? this.readApiKeyFromEnv();
         const loginCompletedPromise = this.awaitNextLoginCompleted();
+        loginCompletedPromise.catch(() => {});
         await this.codexClient.accountLogin({
             type: "apiKey",
             apiKey,
@@ -214,11 +254,11 @@ export class CodexAcpClient {
     }
 
     private async authenticateWithChatGpt(): Promise<Boolean> {
-        const accountResponse = await this.codexClient.accountRead({refreshToken: true});
-        if (accountResponse.account?.type === "chatgpt") {
+        if (await this.hasWorkingChatGptLogin()) {
             return true;
         }
         const loginCompletedPromise = this.awaitNextLoginCompleted();
+        loginCompletedPromise.catch(() => {});
         const loginResponse = await this.codexClient.accountLogin({type: "chatgpt"});
         if (loginResponse.type == "chatgpt") {
             await open(loginResponse.authUrl);
@@ -227,15 +267,40 @@ export class CodexAcpClient {
         return result.success;
     }
 
+    /**
+     * Reads with a token refresh whether the agent has a ChatGPT login that a new login does not need to replace.
+     *
+     * An unavailable read answers `true`: only a ChatGPT login runs the routing discovery that failed, see
+     * {@link isAccountReadUnavailableError}, and a new login cannot run without the network either.
+     * A read that failed because the login does not work answers `false`, so a new login replaces it, see
+     * {@link isAccountReadAuthFailureError}. Another error rejects.
+     */
+    private async hasWorkingChatGptLogin(): Promise<boolean> {
+        try {
+            const accountResponse = await this.codexClient.accountRead({refreshToken: true});
+            return accountResponse.account?.type === "chatgpt";
+        } catch (error) {
+            if (isAccountReadUnavailableError(error)) {
+                logger.log("Account read unavailable, so the stored ChatGPT login stays", {error: String(error)});
+                return true;
+            }
+            if (isAccountReadAuthFailureError(error)) {
+                logger.log("The stored ChatGPT login does not work, so a new login starts", {error: String(error)});
+                return false;
+            }
+            throw error;
+        }
+    }
+
     private async authenticateWithChatGptDeviceCode(urlElicitationRequester?: UrlElicitationRequester): Promise<Boolean> {
-        const accountResponse = await this.codexClient.accountRead({refreshToken: true});
-        if (accountResponse.account?.type === "chatgpt") {
+        if (await this.hasWorkingChatGptLogin()) {
             return true;
         }
         if (!urlElicitationRequester) {
             throw RequestError.invalidRequest(undefined, "Device code authentication requires URL elicitation support");
         }
         const loginCompletedPromise = this.awaitNextLoginCompleted();
+        loginCompletedPromise.catch(() => {});
         const loginResponse = await this.codexClient.accountLogin({type: "chatgptDeviceCode"});
         if (loginResponse.type !== "chatgptDeviceCode") {
             return false;
@@ -245,30 +310,41 @@ export class CodexAcpClient {
             message: `Sign in to ChatGPT and enter this code: ${loginResponse.userCode}`,
             elicitationId: loginResponse.loginId,
         }));
-        const first = await Promise.race([
-            loginCompletedPromise.then(result => ({
-                type: "loginCompleted" as const,
-                result,
-            })),
-            elicitationResponsePromise.then(response => ({
-                type: "elicitationResponse" as const,
-                response,
-            })),
-        ]);
+        try {
+            const first = await Promise.race([
+                loginCompletedPromise.then(result => ({
+                    type: "loginCompleted" as const,
+                    result,
+                })),
+                elicitationResponsePromise.then(response => ({
+                    type: "elicitationResponse" as const,
+                    response,
+                })),
+            ]);
 
-        if (first.type === "loginCompleted") {
+            if (first.type === "loginCompleted") {
+                await urlElicitationRequester.completeElicitation();
+                return first.result.success;
+            }
+
+            if (!acp.CreateElicitationResponse.isAccept(first.response)) {
+                await this.codexClient.accountLoginCancel({loginId: loginResponse.loginId});
+                throw RequestError.requestCancelled(
+                    {methodId: "chat-gpt-device-code", action: first.response.action},
+                    "ChatGPT device code sign-in was cancelled",
+                );
+            }
+
+            const result = await loginCompletedPromise;
             await urlElicitationRequester.completeElicitation();
-            return first.result.success;
+            return result.success;
+        } catch (error) {
+            // A lost app-server ends the login: the open URL elicitation must not stay open in the client.
+            if (this.codexClient.connectionLoss.lost) {
+                await Promise.resolve(urlElicitationRequester.completeElicitation()).catch(() => {});
+            }
+            throw error;
         }
-
-        if (!acp.CreateElicitationResponse.isAccept(first.response)) {
-            await this.codexClient.accountLoginCancel({loginId: loginResponse.loginId});
-            return false;
-        }
-
-        const result = await loginCompletedPromise;
-        await urlElicitationRequester.completeElicitation();
-        return result.success;
     }
 
     private authenticateWithGateway(authRequest: GatewayAuthRequest): boolean {
@@ -349,21 +425,23 @@ export class CodexAcpClient {
 
     async logout(): Promise<void> {
         const accountUpdatedPromise = this.awaitNextAccountUpdated();
+        accountUpdatedPromise.catch(() => {});
         await this.codexClient.accountLogout();
         await accountUpdatedPromise;
     }
 
-    async authRequired(): Promise<Boolean> {
+    /** Reads whether the agent needs a login, with the account read that gave the answer. */
+    async readAuthRequirement(): Promise<AuthRequirement> {
         if (this.gatewayConfig != null) {
             // The authentication is already in progress:
             // the gateway config is set during the authentication request processing.
             // We assume that custom model providers will handle authentication themselves,
             // so Codex will not need to require it.
-            return false;
+            return {required: false, account: null};
         }
 
-        const response = await this.codexClient.accountRead({refreshToken: false})
-        return response.requiresOpenaiAuth && !response.account;
+        const response = await this.codexClient.accountRead({refreshToken: false});
+        return {required: response.requiresOpenaiAuth && !response.account, account: response};
     }
 
     /**
@@ -548,6 +626,21 @@ export class CodexAcpClient {
         return settingsModelProvider?.config?.model_provider ?? null;
     }
 
+    /**
+     * `thread/resume`, with a fallback for a thread Codex has not materialized
+     * on disk yet.
+     *
+     * Codex writes a thread's rollout file on its first user message, so
+     * `thread/resume` fails with "no rollout found" for a session that was
+     * created but never prompted. Such a thread is still live in the
+     * app-server -- and still subscribed, since `thread/start` subscribed it --
+     * so `thread/read` answers for it and gives back the same state resume
+     * would have. A thread id Codex has genuinely never seen fails both calls,
+     * and the original resume error is what the caller sees.
+     *
+     * A thread that another Codex client has loaded fails with a clear ACP
+     * error instead of the raw Codex message.
+     */
     private async resumeThread(params: ThreadResumeParams): Promise<ResumedThread> {
         try {
             const response = await this.codexClient.threadResume(params);
@@ -562,6 +655,7 @@ export class CodexAcpClient {
                 collaborationMode: response.collaborationMode?.mode ?? null,
             };
         } catch (err) {
+            if (isThreadActiveWriterError(err)) throw threadActiveWriterRequestError(params.threadId, err);
             if (!isMissingRolloutError(err)) throw err;
             let response;
             try {
@@ -589,16 +683,17 @@ export class CodexAcpClient {
     }
 
     async resumeSession(
-        request: WithAcpMcpServers<acp.ResumeSessionRequest>,
+        request: acp.ResumeSessionRequest,
         onSubscribed?: (sessionId?: string) => void,
     ): Promise<SessionMetadata> {
         const project = readWorktreeProject(request._meta);
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
 
+        const sessionConfig = await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? [], request._meta);
         const response = await this.resumeThread({
             excludeTurns: true,
-            config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? [], request._meta),
+            config: sessionConfig.config,
             cwd: request.cwd,
             modelProvider: await this.getResumeModelProvider(),
             threadId: request.sessionId,
@@ -616,10 +711,14 @@ export class CodexAcpClient {
             modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
             additionalDirectories,
+            skippedMcpServers: sessionConfig.skippedMcpServers,
         }
     }
 
-    async forkSession(request: WithAcpMcpServers<acp.ForkSessionRequest>): Promise<SessionMetadata> {
+    async forkSession(
+        request: acp.ForkSessionRequest,
+        releaseFailedFork: (threadId: string) => Promise<void> = threadId => this.closeSession(threadId),
+    ): Promise<SessionMetadata> {
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         return await runForkSession(request, additionalDirectories, {
             codexClient: this.codexClient,
@@ -632,17 +731,19 @@ export class CodexAcpClient {
             createCurrentModelId: (models, model, reasoningEffort) =>
                 this.createModelId(models, model, reasoningEffort).toString(),
             getCollaborationMode: sessionId => this.getCollaborationMode(sessionId),
+            releaseFailedFork,
         });
     }
 
-    async loadSession(request: WithAcpMcpServers<acp.LoadSessionRequest>, onSubscribed?: () => void): Promise<SessionMetadataWithThread> {
+    async loadSession(request: acp.LoadSessionRequest, onSubscribed?: () => void): Promise<SessionMetadataWithThread> {
         const project = readWorktreeProject(request._meta);
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
 
+        const sessionConfig = await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? [], request._meta);
         const response = await this.resumeThread({
             excludeTurns: true,
-            config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? [], request._meta),
+            config: sessionConfig.config,
             cwd: request.cwd,
             modelProvider: await this.getResumeModelProvider(),
             threadId: request.sessionId,
@@ -652,13 +753,10 @@ export class CodexAcpClient {
         // Resume cursors bound durable history; later turns arrive through live events.
         // A null paginated cursor means there was no durable history at resume time.
         let thread: Thread = {...response.thread, turns: []};
-        let history: AsyncIterable<ThreadItemEntry[]> = noItems();
+        let history: AsyncIterable<import("./app-server/v2").ThreadItemEntry[]> = noItems();
         if (response.materialized && response.thread.historyMode === "paginated") {
             if (response.itemsBackwardsCursor !== null) {
-                history = this.codexClient.threadItemEntryPages(
-                    response.thread.id,
-                    {lastItemCursor: response.itemsBackwardsCursor},
-                );
+                history = this.codexClient.threadItemEntryPages(response.thread.id, {lastItemCursor: response.itemsBackwardsCursor});
             }
         } else if (response.materialized) {
             // A legacy store reads the whole history in one request.
@@ -684,6 +782,7 @@ export class CodexAcpClient {
             thread,
             history,
             additionalDirectories,
+            skippedMcpServers: sessionConfig.skippedMcpServers,
         };
     }
 
@@ -717,17 +816,20 @@ export class CodexAcpClient {
         return null;
     }
 
-    async newSession(request: WithAcpMcpServers<acp.NewSessionRequest>, onSubscribed?: (sessionId?: string) => void): Promise<SessionMetadata> {
+    async newSession(request: acp.NewSessionRequest, onSubscribed?: (sessionId?: string) => void): Promise<SessionMetadata> {
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
+        const developerInstructions = airCustomInstructions(request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
 
         const project = readWorktreeProject(request._meta);
         const projectId = await this.worktreeProjects.resolve(project);
+        const sessionConfig = await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? [], request._meta);
         const response = await this.codexClient.threadStart({
             ...(projectId ? {projectId} : {}),
-            config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? [], request._meta),
+            config: sessionConfig.config,
             modelProvider: this.getModelProvider(),
             cwd: request.cwd,
+            ...(developerInstructions !== undefined && {developerInstructions}),
         });
         onSubscribed?.(response.thread.id);
 
@@ -744,6 +846,7 @@ export class CodexAcpClient {
             modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
             additionalDirectories,
+            skippedMcpServers: sessionConfig.skippedMcpServers,
         };
     }
 
@@ -754,18 +857,6 @@ export class CodexAcpClient {
             this.codexClient.clearThreadHandlers(sessionId);
             this.subagents.clear(sessionId);
         }
-    }
-
-    /**
-     * Drops a session's notification handler without unsubscribing on the
-     * app-server: for a baseline tracker registered before `thread/resume`
-     * (to catch a Codex-initiated turn that starts before setup finishes)
-     * whose resume/load never actually subscribed the connection, so there
-     * is nothing to unsubscribe there.
-     */
-    discardSessionSubscription(sessionId: string): void {
-        this.codexClient.clearThreadHandlers(sessionId);
-        this.subagents.clear(sessionId);
     }
 
     async deleteSession(sessionId: string): Promise<void> {
@@ -869,20 +960,24 @@ export class CodexAcpClient {
         await this.codexClient.runGoalClear({threadId: sessionId});
     }
 
-    async awaitMcpServerStartup(serverNames: Array<string>, afterVersion: number): Promise<McpStartupResult> {
-        return await this.codexClient.awaitMcpServerStartup(serverNames, afterVersion);
+    async awaitMcpServerStartup(
+        serverNames: Array<string>,
+        afterVersion: number,
+        options: McpServerStartupWaitOptions,
+    ): Promise<McpStartupResult> {
+        return await this.codexClient.mcpStartup.await(serverNames, afterVersion, options);
     }
 
     getMcpServerStartupVersion(): number {
-        return this.codexClient.getMcpServerStartupVersion();
+        return this.codexClient.mcpStartup.version();
     }
 
     private async createSessionConfig(
         projectPath: string,
         additionalDirectories: string[],
-        mcpServers: Array<AcpMcpServer>,
+        mcpServers: Array<acp.McpServer>,
         meta?: unknown,
-    ): Promise<JsonObject> {
+    ): Promise<SessionConfig> {
         const sessionRoots = [projectPath, ...additionalDirectories];
         const activeProvider = this.gatewayConfig
             ? {
@@ -906,11 +1001,11 @@ export class CodexAcpClient {
         };
         const configWithWorkspaceRoots = mergeSandboxWorkspaceWriteRoots(mergedConfig, additionalDirectories);
         if (mcpServers.length === 0) {
-            return configWithWorkspaceRoots;
+            return {config: configWithWorkspaceRoots, skippedMcpServers: []};
         }
 
         const requestedServers = mcpServers.map(mcp => ({
-            name: sanitizeMcpServerName(getMcpServerName(mcp)),
+            name: sanitizeMcpServerName(mcp.name),
             server: mcp,
         }));
         let serversToConfigure = requestedServers;
@@ -919,13 +1014,25 @@ export class CodexAcpClient {
             const existingNames = await this.getConfigMcpServerNames(projectPath);
             serversToConfigure = requestedServers.filter(mcp => !existingNames.has(mcp.name));
         }
+        const skippedMcpServers = requestedServers
+            .filter(mcp => !serversToConfigure.includes(mcp))
+            .map(mcp => mcp.name);
+        if (skippedMcpServers.length > 0) {
+            logger.log("Skipping requested MCP servers that the Codex config already defines", {
+                projectPath,
+                skippedMcpServers,
+            });
+        }
         if (serversToConfigure.length === 0) {
-            return configWithWorkspaceRoots;
+            return {config: configWithWorkspaceRoots, skippedMcpServers};
         }
 
         return {
-            ...configWithWorkspaceRoots,
-            "mcp_servers": Object.fromEntries(serversToConfigure.map(mcp => [mcp.name, toCodexMcpServerConfig(normalizeMcpServer(mcp.server))])),
+            config: {
+                ...configWithWorkspaceRoots,
+                "mcp_servers": Object.fromEntries(serversToConfigure.map(mcp => [mcp.name, this.createMcpSeverConfig(mcp.server)])),
+            },
+            skippedMcpServers,
         };
     }
 
@@ -970,6 +1077,30 @@ export class CodexAcpClient {
             cwds: [cwd, ...additionalRoots],
             forceReload: true,
         });
+    }
+
+    /**
+     * Create a codex config entry for MCP server
+     */
+    private createMcpSeverConfig(mcpServer: McpServer): JsonObject {
+        if ("type" in mcpServer) {
+            switch (mcpServer.type) {
+                case "acp":
+                    throw RequestError.invalidRequest("Codex doesn't support MCP ACP transport protocol")
+                case "sse":
+                    throw RequestError.invalidRequest("Codex doesn't support MCP SSE transport protocol")
+                case "http":
+                    return {
+                        "url": mcpServer.url,
+                        "http_headers": Object.fromEntries(mcpServer.headers.map(h => [h.name, h.value])),
+                    }
+            }
+        }
+        return {
+            "command": mcpServer.command,
+            "args": mcpServer.args,
+            "env": Object.fromEntries(mcpServer.env.map(env => [env.name, env.value])),
+        }
     }
 
     /**
@@ -1041,9 +1172,7 @@ export class CodexAcpClient {
     }
 
     onConnectionClosed(callback: () => void): () => void {
-        const close = this.codexClient.connection.onClose(callback);
-        const dispose = this.codexClient.connection.onDispose(callback);
-        return () => { close.dispose(); dispose.dispose(); };
+        return this.codexClient.connectionLoss.onLost(callback);
     }
 
     private enqueueSessionNotification(sessionId: string, operation: () => void | Promise<void>): void {
@@ -1075,7 +1204,6 @@ export class CodexAcpClient {
         additionalDirectories: string[],
         onTurnStarted?: (turnId: string) => void,
         shouldCancel?: () => boolean,
-        clientUserMessageId?: string,
     ): Promise<TurnCompletedNotification | null> {
         const input = buildPromptItems(request.prompt);
         const effort = modelId.effort as ReasoningEffort | null; //TODO remove unsafe conversion
@@ -1093,7 +1221,6 @@ export class CodexAcpClient {
             effort: effort,
             model: modelId.model,
             serviceTier: serviceTier,
-            ...(clientUserMessageId !== undefined ? {clientUserMessageId} : {}),
         };
         return await this.codexClient.runTurn(params, onTurnStarted);
     }
@@ -1155,17 +1282,23 @@ export class CodexAcpClient {
         method: "account/login/completed" | "account/updated",
         mapEvent: (event: T) => T,
     ): Promise<T> {
-        return await new Promise((resolve) => {
-            let disposable: Disposable | undefined;
+        let disposable: Disposable | undefined;
+        const notified = new Promise<T>((resolve) => {
             disposable = this.codexClient.connection.onNotification(method, (event: T) => {
                 disposable?.dispose();
                 resolve(mapEvent(event));
             });
         });
+        return await this.codexClient.waitWhileConnected(method, notified, () => disposable?.dispose());
     }
 
-    async listMcpServers(): Promise<ListMcpServerStatusResponse> {
-        return this.codexClient.listMcpServerStatus({});
+    async listMcpServers(params: ListMcpServerStatusParams): Promise<ListMcpServerStatusResponse> {
+        return this.codexClient.listMcpServerStatus(params);
+    }
+
+    /** Reloads the MCP configuration. Codex reconnects the servers of every loaded thread that failed, closed, or changed. */
+    async reloadMcpServers(): Promise<void> {
+        await this.codexClient.mcpServerReload();
     }
 
     async mcpServerOauthLogin(
@@ -1177,8 +1310,9 @@ export class CodexAcpClient {
     async awaitMcpServerOauthLoginCompleted(
         name: string,
         threadId: string,
+        signal?: AbortSignal,
     ): Promise<McpServerOauthLoginCompletedNotification> {
-        return await this.codexClient.awaitMcpServerOauthLoginCompleted(name, threadId);
+        return await this.codexClient.mcpOauthCompletions.await(name, threadId, signal);
     }
 
     async listSessions(request: acp.ListSessionsRequest): Promise<acp.ListSessionsResponse> {
@@ -1216,7 +1350,7 @@ export class CodexAcpClient {
         const mapThreadToSession = (thread: Thread) => ({
             sessionId: thread.id,
             cwd: thread.cwd,
-            title: (thread.name ?? thread.preview) || null,
+            title: listedSessionTitle(thread),
             updatedAt: new Date(thread.updatedAt * 1000).toISOString(),
         });
 
@@ -1303,6 +1437,11 @@ export class CodexAcpClient {
 }
 
 export type JsonObject = { [key in string]?: JsonValue }
+
+export type SessionConfig = {
+    config: JsonObject,
+    skippedMcpServers: string[],
+}
 
 function buildPromptItems(prompt: readonly acp.ContentBlock[]): UserInput[] {
     return prompt.map((block): UserInput | null => {

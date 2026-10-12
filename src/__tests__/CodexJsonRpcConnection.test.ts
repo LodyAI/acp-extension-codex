@@ -11,6 +11,10 @@ vi.mock('node:child_process', async importOriginal => {
     const actual = await importOriginal<typeof import('node:child_process')>();
     return {...actual, spawn: vi.fn(actual.spawn)};
 });
+vi.mock('cross-spawn', async () => {
+    const {spawn} = await import('node:child_process');
+    return {default: spawn};
+});
 const roots: string[] = [];
 const children: ChildProcessWithoutNullStreams[] = [];
 const fixture = "require('node:readline').createInterface({input:process.stdin}).on('line', line => {const request=JSON.parse(line);process.stdout.write(JSON.stringify({id:request.id,result:{args:process.argv.slice(1),home:process.env.CODEX_HOME,token:process.env.LODY_CODEX_PROCESS_TOKEN??null}})+'\\n');});";
@@ -81,12 +85,12 @@ describe('startCodexConnection', () => {
         expect(await second.connection.sendRequest('still-running')).toEqual(result);
     });
 
-    it('preserves legacy Windows shell launch and native home without a profile token', async () => {
+    it('passes Windows shim arguments through cross-spawn and preserves native home without a profile token', async () => {
         const test = await processFixture('win32');
         const env = {CODEX_HOME: path.join(test.root, 'home')};
         const native = startCodexConnection('C:\\Program Files\\Codex\\codex.cmd', env);
-        expect(await native.connection.sendRequest('probe')).toEqual({args: [], home: env.CODEX_HOME, token: null});
-        expect(test.observed()).toEqual({command: '"C:\\Program Files\\Codex\\codex.cmd" app-server', args: [], shell: true, windowsHide: true});
+        expect(await native.connection.sendRequest('probe')).toEqual({args: ['app-server'], home: env.CODEX_HOME, token: null});
+        expect(test.observed()).toEqual({command: 'C:\\Program Files\\Codex\\codex.cmd', args: ['app-server'], shell: undefined, windowsHide: true});
     });
 
     it('forwards live app-server stderr to the adapter stderr while stdout stays protocol-only', async () => {

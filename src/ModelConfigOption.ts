@@ -1,6 +1,5 @@
 import {RequestError} from "@agentclientprotocol/sdk";
 import {z} from "zod";
-import type {LodySessionConfig} from "acp-extension-core";
 import type {SessionConfigOption} from "@agentclientprotocol/sdk";
 import type {ReasoningEffort} from "./app-server";
 import type {Model, ReasoningEffortOption} from "./app-server/v2";
@@ -110,7 +109,7 @@ export function createReasoningEffortConfigOption(
 }
 
 
-const startupConfigSchema: z.ZodType<LodySessionConfig> = z.object({
+const startupConfigSchema = z.object({
     version: z.literal(1),
     modelId: z.string().min(1).optional(),
     configOptionValues: z.record(z.string(), z.union([z.string(), z.boolean()])),

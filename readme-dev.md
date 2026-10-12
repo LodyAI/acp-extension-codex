@@ -42,9 +42,9 @@ cannot release its prompt. See the [cancellation boundary decision](.agents/note
 - `CODEX_API_KEY` - API key used when the API-key auth method is selected. Takes precedence over `OPENAI_API_KEY`.
 - `OPENAI_API_KEY` - fallback API key used when the API-key auth method is selected.
 - `CODEX_PATH` - run a specific Codex executable instead of the bundled package dependency.
-- `CODEX_CONFIG` - JSON object merged into the Codex session config.
+- `CODEX_CONFIG` - JSON object merged into the Codex session config. `hooks` move to App Server startup (`-c hooks=...`) for AIR review; Codex rejects malformed hooks at startup and `initialize` reports its error.
 - `LODY_CODEX_PROFILE_CONFIG` - host-owned nonsecret JSON config also supplied as native startup `-c` options, so keyring and provider selection apply before app-server initialization. Managed profiles use a per-launch loopback capability instead of an upstream API key.
-- `LODY_CODEX_PROCESS_TOKEN` - optional nonsecret host-generated UUID identifying one native process use. With managed config and `CODEX_HOME`, the host must first create `../processes/<token>.json` containing `{version: 1, token}`. The adapter writes only the corresponding `<token>.native.json` PID/exit proof and removes the token from native child env. Independent tokens permit concurrent processes for the same home; unknown state delays host credential deletion only. Without managed profile configuration, legacy startup (including Windows shell launch) is unchanged; a profile without a process token emits no usage proof. See [the process boundary decision](.agents/notes/proposed/architecture/2026-09-26-managed-profile-process-usage.md).
+- `LODY_CODEX_PROCESS_TOKEN` - optional nonsecret host-generated UUID identifying one native process use. With managed config and `CODEX_HOME`, the host must first create `../processes/<token>.json` containing `{version: 1, token}`. The adapter writes only the corresponding `<token>.native.json` PID/exit proof and removes the token from native child env. Independent tokens permit concurrent processes for the same home; unknown state delays host credential deletion only. Windows command shims use cross-spawn argument escaping and hide their console; a profile without a process token emits no usage proof. See [the process boundary decision](.agents/notes/proposed/architecture/2026-09-26-managed-profile-process-usage.md).
 - `MODEL_PROVIDER` - model provider to pass to Codex for new sessions.
 - `DEFAULT_AUTH_REQUEST` - ACP auth request JSON used when Codex requires authentication.
 - `INITIAL_AGENT_MODE` - initial mode id: `read-only`, `agent`, `agent-auto-review`, or `agent-full-access`.
@@ -58,6 +58,8 @@ deleting credentials. This does not coordinate native refreshes across processes
 `node --import tsx scripts/probe-refresh-contention.mjs` demonstrates the
 remaining race with two pinned native processes, synthetic file-backed tokens,
 and an isolated local refresh endpoint; it uses no real account or keyring.
+- `CODEX_ACP_APP_SERVER_CRASH_LIMIT` - how many crashes of the Codex app-server in the crash window stop its automatic restart (default `5`).
+- `CODEX_ACP_APP_SERVER_CRASH_WINDOW_MS` - the crash window in milliseconds (default `300000`, 5 minutes).
 
 ### Quick start
 
@@ -133,7 +135,7 @@ npm run package:all
 
 ## Plan configuration
 
-Codex translates Core’s boolean `plan_mode` option to its native default/plan collaboration state. Approval and sandbox settings are retained. The `/plan` command uses the same boolean configuration path. A standalone `/plan` toggles the mode without starting a turn. `/plan <prompt>` enables plan mode (including when already enabled), removes only the command prefix, and submits the remaining text and attachments through the normal prompt lifecycle. A following content block also counts as a prompt. ACP v2 acknowledges these requests only after native user-message insertion; configuration failures do not submit the prompt.
+Codex translates Core’s boolean `plan_mode` option to its native default/plan collaboration state. Approval and sandbox settings are retained. The `/plan` command uses the same boolean configuration path. A standalone `/plan` toggles the mode without starting a turn. `/plan <prompt>` enables plan mode (including when already enabled), removes only the command prefix, and submits the remaining text and attachments through the normal prompt lifecycle. A following content block also counts as a prompt. Configuration failures do not submit the prompt.
 
 ## Steering delivery reconciliation
 
@@ -189,34 +191,45 @@ See the [diff statistics specification](docs/diff-statistics-extension.md) for t
 `_meta.jetbrains.air.diffStats` payload and its compatibility rules.
 
 
-## Upstream ACP v2 merge (2026-09-30)
+## Upstream merge (2026-10-12)
 
-Upstream `agentclientprotocol/codex-acp` main at `ba7b216` adds ACP v2 routing,
-streamed history replay, tool-call reporters with exact patches, terminal delta
-output, MCP startup waiting, and Codex 0.159.1. The SDK is now 1.5.x;
-`acp-extension-core` remains pinned to 0.1.9.
+Upstream main `202e66e` (2.2.2) temporarily reverts ACP v2. This adapter follows
+that rollback and serves ACP v1, while retaining Core 0.1.9 contracts. Hosts that
+previously opted into ACP v2 must initialize with version 1 again. The package
+retains its independent Lody release version and the SDK stays on 1.5.x.
 
-Existing Core hosts can continue initializing protocol version 1. Core extension
-method names, steer IDs/applied acknowledgements, usage scopes, native fork turn
-IDs, managed profiles, worktree projects, elicitation answer notes, and structured
-warning/error metadata remain supported. Core mode IDs and defaults are retained.
-ACP v1 prompts still wait for native completion, including goal continuations and
-manual compact/review ownership. ACP v2 is selected explicitly at initialization;
-its prompt response acknowledges insertion and completion arrives through session
-state updates. A Core host must implement that lifecycle before opting into v2.
+Codex moves to 0.160.1. Upstream adds negotiated AIR session indexes and list
+subscriptions, explicit rename/archive operations, hook trust before session open,
+MCP live status and `/mcp reconnect`, custom session instructions, and app-server
+crash recovery. AIR extensions require the corresponding client capabilities;
+installing the adapter alone does not enable them in Core clients.
 
-Core steering remains inject-or-refuse on both routes: `_lody/session/steer`
-requires `steerId`, never starts a replacement turn, and retains ambiguous errors.
-AIR metadata is additive when negotiated. Tool updates can omit unchanged fields;
-clients must merge updates with the existing tool call. Legacy terminal output is
-retained for clients declaring `_meta.terminal_output`; otherwise output uses deltas.
-
-New request option `_meta.mcpStartupAwaitTimeoutMs` on session new/resume/fork is
-an optional positive millisecond budget for awaiting requested MCP servers. Omitted
-or nonpositive values do not wait; expiry does not cancel startup. Session load
-ignores this option. See [MCP startup waiting](docs/mcp-startup-await-timeout.md).
-
+Core steering remains inject-or-refuse; usage remains scoped to native turns;
+compact/review cancellation waits for native completion; managed profiles,
+worktree projects, startup model selection, and structured notices remain intact.
+Automatic title generation remains the ACP client's responsibility: the adapter
+never starts an auxiliary title turn. Explicit session-index renames are supported.
 
 ## Startup model selection
 
 Core's `_meta.lody.sessionConfig` version 1 supplies optional `modelId` and a `configOptionValues` dictionary on new/load/resume/fork. The adapter applies model and reasoning to native configuration before establishing the thread. Explicit `modelId` wins over the `model` option; `reasoning_effort` wins over a legacy `model[effort]` suffix. Missing selection preserves native defaults, while malformed selection fails with invalid params. Other options still use live ACP configuration. Native model-mismatch warnings are preserved for intentional switches.
+
+### App-server recovery
+
+The adapter restarts the Codex app-server when it dies (for example, killed for lack of memory). Its code is in
+`src/app-server-recovery/`.
+
+- A request that was waiting on the dead app-server fails with error `1001` and the cause, such as "was killed by
+  SIGKILL, which usually means it ran out of memory". A running prompt ends at once: open tool calls become `failed`,
+  open permission dialogs are cancelled, and an AIR client gets the `transport_lost` session failure.
+- An app-server that exits before its `initialize` handshake succeeded, such as one that rejects its startup config,
+  fails the request with "Codex process has exited with code N:" and its stderr, and no promise of a restart.
+- The next request starts a new app-server with the same `initialize` handshake and provider routing. A session that
+  was open is resumed on its next use, with the model, mode and settings that the adapter kept.
+- Codex writes a thread to disk only with its first message, so a session without messages cannot be resumed in a new
+  app-server, after a crash or a provider restart. Its next use fails with "had no messages yet and was lost"; the
+  client starts a new session. A provider restart still completes for the agent and the other sessions.
+- After `CODEX_ACP_APP_SERVER_CRASH_LIMIT` crashes in the crash window the adapter stops restarting it and says so,
+  with the stderr of the last crash.
+  A session that the app-server died opening twice in 30 minutes is not opened again for the rest of that time, so
+  one session that is too large for the memory cannot take the other sessions down with it.
