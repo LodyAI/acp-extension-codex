@@ -23,6 +23,17 @@ import {CodexSessionCompactions} from "../CodexSessionCompactions";
 import {AUTH_STATUS_UPDATE_METHOD} from "../AuthStatusMeta";
 import {ClientCapabilities} from "../tool-calls/ClientCapabilities";
 
+export function createTestConfigResponse(config: Record<string, import("../app-server/serde_json/JsonValue").JsonValue> = {}): import("../app-server/v2").ConfigReadResponse {
+    return {
+        config: config as import("../app-server/v2").Config,
+        origins: {},
+        layers: [{
+            name: {type: "user", file: "/synthetic/codex-home/config.toml", profile: null},
+            version: "test-version", config, disabledReason: null,
+        }],
+    };
+}
+
 export type MethodCallEvent = { method: string; args: any[] };
 
 export interface SmartMockConfig {
@@ -295,7 +306,11 @@ export function createCodexMockTestFixture(
     };
 
     const mockCodexConnection = {
-        sendRequest: () => Promise.resolve(undefined),
+        sendRequest: (method: string) => Promise.resolve(method === "config/read"
+            ? createTestConfigResponse()
+            : method === "config/batchWrite"
+                ? {status: "ok", version: "test-version", filePath: "/synthetic/codex-home/config.toml", overriddenMetadata: null}
+                : undefined),
         onClose: () => ({ dispose: () => {} }),
         onUnhandledNotification: (handler: (notification: any) => void) => {
             unhandledNotificationHandler = handler;

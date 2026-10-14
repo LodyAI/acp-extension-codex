@@ -1,3 +1,4 @@
+import {createTestConfigResponse} from "../acp-test-utils";
 import {describe, expect, it, vi} from "vitest";
 import type {McpServerStdio} from "@agentclientprotocol/sdk";
 import {forkSession} from "../../SessionFork";
@@ -19,7 +20,7 @@ describe("ACP session fork", () => {
 
         vi.spyOn(codexAppServerClient, "skillsExtraRootsSet").mockResolvedValue(undefined);
         vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({data: []});
-        vi.spyOn(codexAppServerClient, "configRead").mockResolvedValue({config: {}} as never);
+        vi.spyOn(codexAppServerClient, "configRead").mockResolvedValue(createTestConfigResponse());
         const threadForkSpy = vi.spyOn(codexAppServerClient, "threadFork").mockResolvedValue({
             thread: {id: "child-session-id"},
             model: model.id,
@@ -105,7 +106,6 @@ describe("ACP session fork", () => {
                     } as never,
                     releaseFailedFork: async threadId => { await threadUnsubscribe({threadId}); },
                     backfillProject: vi.fn().mockRejectedValue(backfillError),
-                    refreshSkills: vi.fn().mockResolvedValue(undefined),
                     createSessionConfig: vi.fn().mockResolvedValue({}),
                     getResumeModelProvider: vi.fn().mockResolvedValue("openai"),
                     fetchAvailableModels: vi.fn(),

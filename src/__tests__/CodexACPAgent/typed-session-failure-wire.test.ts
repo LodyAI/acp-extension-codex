@@ -4,7 +4,7 @@ import {ResponseError} from "vscode-jsonrpc/node";
 import {CodexAppServerClient} from "../../CodexAppServerClient";
 import {CodexAcpClient} from "../../CodexAcpClient";
 import {CodexAcpServer} from "../../CodexAcpServer";
-import {createTestSessionState} from "../acp-test-utils";
+import {createTestConfigResponse, createTestSessionState} from "../acp-test-utils";
 import {createMockConnections} from "./test-utils";
 
 const noticeCapabilities: acp.ClientCapabilities = {
@@ -664,6 +664,8 @@ function createWireFixture(options: {exitCode?: number | null; stderr?: string} 
     const mockConnections = createMockConnections();
     const appServer = new CodexAppServerClient(mockConnections.mockCodexConnection);
     const codexClient = new CodexAcpClient(appServer);
+    vi.spyOn(appServer, "configRead").mockResolvedValue(createTestConfigResponse());
+    vi.spyOn(appServer, "configBatchWrite").mockResolvedValue({status: "ok", version: "test-version", filePath: "/synthetic/codex-home/config.toml", overriddenMetadata: null});
     vi.spyOn(appServer, "initialize").mockResolvedValue({codexHome: null} as never);
 
     const clientToAgent = new TransformStream<Uint8Array, Uint8Array>();
