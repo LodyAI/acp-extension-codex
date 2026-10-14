@@ -1,4 +1,3 @@
-import {createTestConfigResponse} from "../acp-test-utils";
 import {describe, expect, it, vi} from "vitest";
 import type {McpServerStdio} from "@agentclientprotocol/sdk";
 import {forkSession} from "../../SessionFork";
@@ -20,7 +19,7 @@ describe("ACP session fork", () => {
 
         vi.spyOn(codexAppServerClient, "skillsExtraRootsSet").mockResolvedValue(undefined);
         vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({data: []});
-        vi.spyOn(codexAppServerClient, "configRead").mockResolvedValue(createTestConfigResponse());
+        vi.spyOn(codexAppServerClient, "configRead").mockResolvedValue({config: {}} as never);
         const threadForkSpy = vi.spyOn(codexAppServerClient, "threadFork").mockResolvedValue({
             thread: {id: "child-session-id"},
             model: model.id,

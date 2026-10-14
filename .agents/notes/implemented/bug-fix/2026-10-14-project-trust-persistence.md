@@ -27,8 +27,9 @@ There is no Core capability, host path-prefix heuristic, or blanket repos-direct
 New/load/resume/fork all use the shared session configuration preparation. A configured
 `untrusted` entry for the requested or canonical cwd is retained in session overrides as
 well as on disk. Native optimistic version checking prevents a concurrent write from
-being lost: conflict means re-read, with at most three attempts. Non-conflict failures
-abort opening the session. No cache or background writer survives session preparation;
+being lost. Read once and write at most once; conflicts and other failures propagate to
+the caller and abort opening the session. The execution directory must already exist;
+`realpath` errors propagate without a fallback. No cache or background writer survives session preparation;
 connection loss rejects the native request. A completed write remains saved if a later
 operation fails or the worktree is deleted. A transport failure can therefore leave a
 successful write on disk; a subsequent open reads it again before deciding to write.
@@ -41,8 +42,9 @@ deferred by product choice; future providers can motivate a common semantic cont
 
 Tests use a real Codex 0.160.1 app-server with temporary homes and synthetic directories.
 They verify project settings become effective before each of the four session operations,
-no-op repetition, preservation of explicit refusal, concurrent unrelated edits and refusal,
-and aborting session establishment on write failure. Native config requests are real;
+no-op repetition, preservation of explicit refusal, rejection of concurrent edits without
+overwriting them, missing-directory rejection, and aborting session establishment on
+write failure. Native config requests are real;
 thread creation/history and model catalogs are stubbed, with no model turn needed by these
 new tests. Existing adapter suites cover session metadata and project ownership.
 
@@ -50,10 +52,7 @@ The adapter has no cwd before the ACP session request. This change does not retr
 warning emitted at process initialization, alter sandbox/tool approvals, or provide trust
 revocation/cleanup. Windows runtime behavior is not exercised by the local macOS run.
 
-Final focused validation passed 268 tests across nine suites, including all nine native
-trust cases; TypeScript checks, the adapter build, and `git diff --check` passed. The full
-suite initially passed 1,668 tests with two failures: its wire-fixture config response was
-updated and verified by the focused rerun; the remaining session-index symlink cleanup
-failure was reproduced in an untouched archive of the adapter baseline. Root docs checks
-remain blocked by existing broken links to uninitialized submodules and other baseline
-documentation errors. No release or parent gitlink update is included.
+Validation results are recorded in the PR. The session-index symlink cleanup failure
+was reproduced in an untouched adapter baseline. Root docs checks remain blocked by
+existing broken links to uninitialized submodules and other baseline documentation errors.
+No release or parent gitlink update is included.

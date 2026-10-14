@@ -13,7 +13,8 @@ import fs from "node:fs";
 import os from "node:os";
 import {AgentMode} from "../AgentMode";
 import {DEFAULT_COLLABORATION_MODE} from "../CollaborationModeConfig";
-import {expect, vi} from "vitest";
+import {expect, onTestFinished, vi} from "vitest";
+import * as projectTrust from "../ProjectTrust";
 import type {Model, ReasoningEffortOption} from "../app-server/v2";
 import {CodexSubagentEventRouter} from "../subagents/CodexSubagentEventRouter";
 import {CodexEventHandler} from "../CodexEventHandler";
@@ -23,15 +24,10 @@ import {CodexSessionCompactions} from "../CodexSessionCompactions";
 import {AUTH_STATUS_UPDATE_METHOD} from "../AuthStatusMeta";
 import {ClientCapabilities} from "../tool-calls/ClientCapabilities";
 
-export function createTestConfigResponse(config: Record<string, import("../app-server/serde_json/JsonValue").JsonValue> = {}): import("../app-server/v2").ConfigReadResponse {
-    return {
-        config: config as import("../app-server/v2").Config,
-        origins: {},
-        layers: [{
-            name: {type: "user", file: "/synthetic/codex-home/config.toml", profile: null},
-            version: "test-version", config, disabledReason: null,
-        }],
-    };
+/** Synthetic session fixtures have no real workspace; native trust has its own integration coverage. */
+export function mockProjectTrust(): void {
+    const trust = vi.spyOn(projectTrust, "ensureProjectTrust").mockResolvedValue("trusted");
+    onTestFinished(() => trust.mockRestore());
 }
 
 export type MethodCallEvent = { method: string; args: any[] };
@@ -293,6 +289,7 @@ export function createCodexMockTestFixture(
     process?: CodexConnection["process"],
     managedChatgptProfile = false,
 ): CodexMockTestFixture {
+    mockProjectTrust();
     let unhandledNotificationHandler: ((notification: any) => void) | null = null;
     const requestHandlers = new Map<string, (params: unknown) => Promise<unknown>>();
     const disposeListeners = new Set<() => void>();
@@ -306,11 +303,7 @@ export function createCodexMockTestFixture(
     };
 
     const mockCodexConnection = {
-        sendRequest: (method: string) => Promise.resolve(method === "config/read"
-            ? createTestConfigResponse()
-            : method === "config/batchWrite"
-                ? {status: "ok", version: "test-version", filePath: "/synthetic/codex-home/config.toml", overriddenMetadata: null}
-                : undefined),
+        sendRequest: () => Promise.resolve(undefined),
         onClose: () => ({ dispose: () => {} }),
         onUnhandledNotification: (handler: (notification: any) => void) => {
             unhandledNotificationHandler = handler;

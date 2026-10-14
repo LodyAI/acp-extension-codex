@@ -1,4 +1,3 @@
-import {createTestConfigResponse} from "../acp-test-utils";
 import {mkdir, mkdtemp, realpath, rm, symlink} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -16,7 +15,7 @@ describe("local project identity across worktrees", () => {
         const native = fixture.getCodexAppServerClient();
         vi.spyOn(native, "skillsExtraRootsSet").mockResolvedValue(undefined);
         vi.spyOn(native, "listSkills").mockResolvedValue({data: []});
-        vi.spyOn(native, "configRead").mockResolvedValue(createTestConfigResponse());
+        vi.spyOn(native, "configRead").mockResolvedValue({config: {}} as never);
         vi.spyOn(native, "listModels").mockResolvedValue({data: [createTestModel()], nextCursor: null});
         vi.spyOn(native, "threadUnsubscribe").mockResolvedValue({} as never);
     });

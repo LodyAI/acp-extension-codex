@@ -222,9 +222,10 @@ in both stored and session configuration.
 
 Additional directories retain their existing session-only behavior. Logical project roots
 from `worktreeProject` and parent directories receive no persistent grant. Configuration
-version conflicts trigger up to three read/write attempts; other read/write failures abort
-session establishment rather than pretending trust was saved. There is no process cache,
-so subsequent opens observe edits made by another client. Trust is not rolled back when a
+is read once and written at most once with an expected version. Conflicts and other
+read/write failures abort session establishment; the caller decides whether to try again.
+The execution directory must already exist; path-resolution errors are propagated. There
+is no process cache, so subsequent opens observe edits made by another client. Trust is not rolled back when a
 later session-open step fails, and worktree deletion does not remove its saved entry.
 
 This policy is internal to the Codex adapter; ACP Core gains no new interface. It does not

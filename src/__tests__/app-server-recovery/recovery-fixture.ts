@@ -1,4 +1,4 @@
-import {createTestConfigResponse} from "../acp-test-utils";
+import {mockProjectTrust} from "../acp-test-utils";
 import * as acp from "@agentclientprotocol/sdk";
 import {vi} from "vitest";
 import {CodexAcpServer, type CodexProcessState} from "../../CodexAcpServer";
@@ -42,8 +42,7 @@ export function defaultAnswer(method: string, params: unknown): unknown {
         case "initialize": return {userAgent: "codex-test", codexHome: "/codex-home"};
         case "model/list": return {data: [MODEL], nextCursor: null};
         case "account/read": return {account: null, requiresOpenaiAuth: false};
-        case "config/read": return createTestConfigResponse();
-        case "config/batchWrite": return {status: "ok"};
+        case "config/read": return {config: {}, origins: {}, layers: null};
         case "skills/list": return {data: []};
         case "thread/start": return {thread: thread(p.ephemeral ? "title-thread" : "thread-new"), model: "gpt-test", modelProvider: "openai", reasoningEffort: "medium", serviceTier: null, cwd: "/work"};
         case "thread/resume": return {thread: thread(p.threadId ?? "t"), model: "gpt-test", modelProvider: "openai", reasoningEffort: "medium", serviceTier: null, itemsBackwardsCursor: null, cwd: "/work"};
@@ -70,6 +69,7 @@ export interface RecoveryFixture {
 }
 
 export function createRecoveryFixture(options: {air?: boolean, env?: Record<string, string>} = {}): RecoveryFixture {
+    mockProjectTrust();
     const answers = new Map<string, (params: unknown, server: FakeAppServer) => unknown>();
     const servers: FakeAppServer[] = [];
     const makeServer = () => {

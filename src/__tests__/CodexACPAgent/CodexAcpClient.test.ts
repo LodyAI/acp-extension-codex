@@ -14,7 +14,6 @@ import type * as acp from "@agentclientprotocol/sdk";
 import {
     awaitFirstAuthStatusPush,
     createCodexMockTestFixture,
-    createTestConfigResponse,
     createTestFixture,
     createTestModel,
     createTestSessionState,
@@ -882,7 +881,11 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         vi.spyOn(codexAppServerClient, "skillsExtraRootsSet").mockResolvedValue(undefined);
         vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({data: []});
-        vi.spyOn(codexAppServerClient, "configRead").mockResolvedValue(createTestConfigResponse({model_provider: "azure"}));
+        vi.spyOn(codexAppServerClient, "configRead").mockResolvedValue({
+            config: {
+                model_provider: "azure",
+            },
+        } as any);
         const threadResumeSpy = vi.spyOn(codexAppServerClient, "threadResume").mockResolvedValue({
             thread: {id: "thread-id"} as any,
             model: "gpt-5",
@@ -924,7 +927,11 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
         vi.spyOn(codexAppServerClient, "skillsExtraRootsSet").mockResolvedValue(undefined);
         vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({data: []});
-        vi.spyOn(codexAppServerClient, "configRead").mockResolvedValue(createTestConfigResponse({model_provider: "azure"}));
+        vi.spyOn(codexAppServerClient, "configRead").mockResolvedValue({
+            config: {
+                model_provider: "azure",
+            },
+        } as any);
         const threadResumeSpy = vi.spyOn(codexAppServerClient, "threadResume").mockResolvedValue({
             thread: {id: "thread-id"} as any,
             model: "gpt-5",
@@ -992,9 +999,15 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const codexAppServerClient = mockFixture.getCodexAppServerClient();
 
         vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({data: []});
-        vi.spyOn(codexAppServerClient, "configRead").mockResolvedValue(createTestConfigResponse({
-            mcp_servers: {shared_mcp: {url: "https://example.com/mcp"}},
-        }));
+        vi.spyOn(codexAppServerClient, "configRead").mockResolvedValue({
+            config: {
+                mcp_servers: {
+                    shared_mcp: {
+                        url: "https://example.com/mcp",
+                    },
+                },
+            },
+        } as any);
         const threadStartSpy = vi.spyOn(codexAppServerClient, "threadStart").mockResolvedValue({
             thread: {id: "thread-id"} as any,
             model: "gpt-5",
@@ -4828,7 +4841,7 @@ describe('persistent execution-directory trust', () => {
         expect(after.config['projects']).toEqual({[cwd]: {trust_level: 'untrusted'}});
     });
 
-    it.each(['unrelated', 'refusal'] as const)('reconciles a concurrent %s edit without overwriting it', async kind => {
+    it.each(['unrelated', 'refusal'] as const)('reports a concurrent %s edit without retrying or overwriting it', async kind => {
         const write = client.configBatchWrite.bind(client);
         let raced = false;
         vi.spyOn(client, 'configBatchWrite').mockImplementation(async params => {
@@ -4842,11 +4855,18 @@ describe('persistent execution-directory trust', () => {
             }
             return await write(params);
         });
-        expect(await ensureProjectTrust(client, cwd)).toBe(kind === 'refusal' ? 'untrusted' : 'trusted');
+        await expect(ensureProjectTrust(client, cwd)).rejects.toMatchObject({
+            data: {config_write_error_code: 'configVersionConflict'},
+        });
         const after = await client.configRead({includeLayers: true});
         expect(after.config['projects']).toEqual(kind === 'refusal'
             ? {[cwd]: {trust_level: 'untrusted'}}
-            : {'/synthetic/other': {trust_level: 'untrusted'}, [cwd]: {trust_level: 'trusted'}});
+            : {'/synthetic/other': {trust_level: 'untrusted'}});
+    });
+
+    it('rejects a missing execution directory without saving trust', async () => {
+        await expect(ensureProjectTrust(client, path.join(cwd, 'missing'))).rejects.toMatchObject({code: 'ENOENT'});
+        expect((await client.configRead({includeLayers: true})).config['projects']).toBeNull();
     });
 
     it('does not open a session when persisting trust fails', async () => {
