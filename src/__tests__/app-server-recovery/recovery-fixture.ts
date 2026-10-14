@@ -1,3 +1,4 @@
+import {mockProjectTrust} from "../acp-test-utils";
 import * as acp from "@agentclientprotocol/sdk";
 import {vi} from "vitest";
 import {CodexAcpServer, type CodexProcessState} from "../../CodexAcpServer";
@@ -68,6 +69,7 @@ export interface RecoveryFixture {
 }
 
 export function createRecoveryFixture(options: {air?: boolean, env?: Record<string, string>} = {}): RecoveryFixture {
+    mockProjectTrust();
     const answers = new Map<string, (params: unknown, server: FakeAppServer) => unknown>();
     const servers: FakeAppServer[] = [];
     const makeServer = () => {

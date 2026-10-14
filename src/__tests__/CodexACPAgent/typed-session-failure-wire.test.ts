@@ -4,7 +4,7 @@ import {ResponseError} from "vscode-jsonrpc/node";
 import {CodexAppServerClient} from "../../CodexAppServerClient";
 import {CodexAcpClient} from "../../CodexAcpClient";
 import {CodexAcpServer} from "../../CodexAcpServer";
-import {createTestSessionState} from "../acp-test-utils";
+import {mockProjectTrust, createTestSessionState} from "../acp-test-utils";
 import {createMockConnections} from "./test-utils";
 
 const noticeCapabilities: acp.ClientCapabilities = {
@@ -661,6 +661,7 @@ async function settleSession(fixture: ReturnType<typeof createWireFixture>, sess
 }
 
 function createWireFixture(options: {exitCode?: number | null; stderr?: string} = {}) {
+    mockProjectTrust();
     const mockConnections = createMockConnections();
     const appServer = new CodexAppServerClient(mockConnections.mockCodexConnection);
     const codexClient = new CodexAcpClient(appServer);

@@ -105,7 +105,6 @@ describe("ACP session fork", () => {
                     } as never,
                     releaseFailedFork: async threadId => { await threadUnsubscribe({threadId}); },
                     backfillProject: vi.fn().mockRejectedValue(backfillError),
-                    refreshSkills: vi.fn().mockResolvedValue(undefined),
                     createSessionConfig: vi.fn().mockResolvedValue({}),
                     getResumeModelProvider: vi.fn().mockResolvedValue("openai"),
                     fetchAvailableModels: vi.fn(),

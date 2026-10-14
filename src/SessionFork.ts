@@ -15,7 +15,6 @@ import {getLodyForkTurnId} from "./AcpExtensions";
 export type SessionForkDependencies = {
     codexClient: CodexAppServerClient;
     backfillProject(thread: Thread, project: LodyWorktreeProject | undefined): Promise<void>;
-    refreshSkills(cwd: string, additionalDirectories: string[]): Promise<void>;
     createSessionConfig(
         cwd: string,
         additionalDirectories: string[],
@@ -36,7 +35,6 @@ export async function forkSession(
     dependencies: SessionForkDependencies,
 ): Promise<SessionMetadata> {
     const project = readWorktreeProject(request._meta);
-    await dependencies.refreshSkills(request.cwd, additionalDirectories);
     const lastTurnId = await resolveForkTurnId(request, dependencies.codexClient);
     const sessionConfig = await dependencies.createSessionConfig(
         request.cwd,

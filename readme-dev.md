@@ -210,6 +210,28 @@ worktree projects, startup model selection, and structured notices remain intact
 Automatic title generation remains the ACP client's responsibility: the adapter
 never starts an auxiliary title turn. Explicit session-index renames are supported.
 
+## Project trust
+
+Opening a new, loaded, resumed, or forked session automatically persists trust for its
+canonical execution directory in the running Codex process's user configuration, before
+skills, MCP discovery, and thread configuration load. This also covers externally created
+worktrees. The adapter uses `config/read` and `config/batchWrite`, follows the native user
+configuration layer (including managed `CODEX_HOME`), and merges only that directory's
+`trust_level`. Existing explicit `untrusted` entries for the directory remain untrusted
+in both stored and session configuration.
+
+Additional directories retain their existing session-only behavior. Logical project roots
+from `worktreeProject` and parent directories receive no persistent grant. Configuration
+is read once and written at most once with an expected version. Conflicts and other
+read/write failures abort session establishment; the caller decides whether to try again.
+The execution directory must already exist; path-resolution errors are propagated. There
+is no process cache, so subsequent opens observe edits made by another client. Trust is not rolled back when a
+later session-open step fails, and worktree deletion does not remove its saved entry.
+
+This policy is internal to the Codex adapter; ACP Core gains no new interface. It does not
+suppress warnings or retroactively change app-server initialization that happened before
+the ACP client supplied a cwd. See the [decision note](.agents/notes/implemented/bug-fix/2026-10-14-project-trust-persistence.md).
+
 ## Startup model selection
 
 Core's `_meta.lody.sessionConfig` version 1 supplies optional `modelId` and a `configOptionValues` dictionary on new/load/resume/fork. The adapter applies model and reasoning to native configuration before establishing the thread. Explicit `modelId` wins over the `model` option; `reasoning_effort` wins over a legacy `model[effort]` suffix. Missing selection preserves native defaults, while malformed selection fails with invalid params. Other options still use live ACP configuration. Native model-mismatch warnings are preserved for intentional switches.

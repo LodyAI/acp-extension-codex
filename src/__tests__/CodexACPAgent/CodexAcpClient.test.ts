@@ -1,3 +1,11 @@
+import * as fs from "node:fs/promises";
+import path from "node:path";
+import os from "node:os";
+import {once} from "node:events";
+import {startCodexConnection} from "../../CodexJsonRpcConnection";
+import {CodexAppServerClient} from "../../CodexAppServerClient";
+import {CodexAcpClient} from "../../CodexAcpClient";
+import {ensureProjectTrust} from "../../ProjectTrust";
 // noinspection ES6RedundantAwait
 
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
@@ -96,6 +104,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             "account/updated",
             // The auth check of session/new. The session open reuses this read, so it reads the account once.
             "account/read",
+            "config/read",
+            "config/batchWrite",
             "thread/start",
             "model/list",
             "thread/started",
@@ -4737,5 +4747,138 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             secondary: {usedPercent: 40, resetsAt: null, windowDurationMins: 10080},
             credits: {hasCredits: true, unlimited: false, balance: "25"},
         });
+    });
+});
+
+describe('persistent execution-directory trust', () => {
+    let home: string;
+    let cwd: string;
+    let native: import('../../CodexJsonRpcConnection').CodexConnection | undefined;
+    let client: import('../../CodexAppServerClient').CodexAppServerClient;
+
+    beforeEach(async () => {
+        native = undefined;
+        home = '';
+        cwd = '';
+        home = await fs.mkdtemp(path.join(os.tmpdir(), 'codex-trust-home-'));
+        cwd = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'codex-trust-project-')));
+        await fs.mkdir(path.join(cwd, '.codex'));
+        await fs.mkdir(path.join(cwd, 'extra'));
+        await fs.writeFile(path.join(cwd, '.codex', 'config.toml'), 'model = "project-config-loaded"\n');
+        native = startCodexConnection(undefined, {...process.env, CODEX_HOME: home});
+        client = new CodexAppServerClient(native.connection);
+        await client.initialize({clientInfo: {name: 'trust-test', title: null, version: '1'}, capabilities: {experimentalApi: true, requestAttestation: false}});
+    });
+
+    afterEach(async () => {
+        if (native) {
+            native.connection.dispose();
+            if (native.process.exitCode === null && native.process.signalCode === null) {
+                const exited = once(native.process, 'exit');
+                native.process.kill();
+                await exited;
+            }
+        }
+        if (home) await fs.rm(home, {recursive: true, force: true});
+        if (cwd) await fs.rm(cwd, {recursive: true, force: true});
+    });
+
+    it.each(['new', 'resume', 'load', 'fork'] as const)('persists trust before %s loads project configuration', async operation => {
+        const acpClient = new CodexAcpClient(client);
+        const saved = await client.configRead({includeLayers: true, cwd});
+        expect(saved.config.model).not.toBe('project-config-loaded');
+        const observeConfiguration = async () => {
+            const effective = await client.configRead({includeLayers: true, cwd});
+            expect(effective.config.model).toBe('project-config-loaded');
+            expect(effective.config['projects']).toEqual({[cwd]: {trust_level: 'trusted'}});
+            return {
+                thread: {id: 'trust-thread', turns: [], historyMode: 'legacy'},
+                model: 'gpt-5', modelProvider: 'openai', reasoningEffort: null,
+                serviceTier: null, itemsBackwardsCursor: null,
+            };
+        };
+        // Native config reads/writes are real; no model turn or network service is needed.
+        vi.spyOn(client, 'threadStart').mockImplementation(async () => await observeConfiguration() as never);
+        vi.spyOn(client, 'threadResume').mockImplementation(async () => await observeConfiguration() as never);
+        vi.spyOn(client, 'threadFork').mockImplementation(async () => await observeConfiguration() as never);
+        vi.spyOn(client, 'threadReadWithHistory').mockResolvedValue({thread: {id: 'trust-thread', turns: []}} as never);
+        vi.spyOn(client, 'listModels').mockResolvedValue({data: [createTestModel({id: 'gpt-5'})], nextCursor: null});
+        const request = {cwd, additionalDirectories: [path.join(cwd, 'extra')], mcpServers: [], sessionId: 'trust-thread'};
+        const session = operation === 'new' ? await acpClient.newSession(request)
+            : operation === 'resume' ? await acpClient.resumeSession(request)
+            : operation === 'load' ? await acpClient.loadSession(request)
+            : await acpClient.forkSession(request);
+        expect(session.sessionId).toBe('trust-thread');
+        expect(await fs.readFile(path.join(home, 'config.toml'), 'utf8')).toContain('trust_level = "trusted"');
+        const before = await client.configRead({includeLayers: true});
+        await ensureProjectTrust(client, cwd);
+        const after = await client.configRead({includeLayers: true});
+        expect(after.layers).toEqual(before.layers);
+    });
+
+    it('stores the canonical target of a symlink without granting the alias or parent', async () => {
+        const alias = path.join(home, 'project-alias');
+        await fs.symlink(cwd, alias, 'junction');
+        expect(await ensureProjectTrust(client, alias)).toBe('trusted');
+        expect((await client.configRead({includeLayers: true})).config['projects'])
+            .toEqual({[cwd]: {trust_level: 'trusted'}});
+        await fs.unlink(alias);
+    });
+
+    it('preserves explicit refusal in durable and session configuration', async () => {
+        await client.configBatchWrite({edits: [{keyPath: 'projects', value: {[cwd]: {trust_level: 'untrusted'}}, mergeStrategy: 'upsert'}]});
+        const acpClient = new CodexAcpClient(client);
+        let threadConfig: unknown;
+        vi.spyOn(client, 'threadStart').mockImplementation(async params => {
+            threadConfig = params.config?.['projects'];
+            return {thread: {id: 'untrusted-thread'}, model: 'gpt-5', reasoningEffort: null} as never;
+        });
+        vi.spyOn(client, 'listModels').mockResolvedValue({data: [createTestModel({id: 'gpt-5'})], nextCursor: null});
+        await acpClient.newSession({cwd, mcpServers: []});
+        expect(threadConfig).toEqual({[cwd]: {trust_level: 'untrusted'}});
+        const after = await client.configRead({includeLayers: true, cwd});
+        expect(after.config.model).not.toBe('project-config-loaded');
+        expect(after.config['projects']).toEqual({[cwd]: {trust_level: 'untrusted'}});
+    });
+
+    it.each(['unrelated', 'refusal'] as const)('reports a concurrent %s edit without retrying or overwriting it', async kind => {
+        const write = client.configBatchWrite.bind(client);
+        let raced = false;
+        vi.spyOn(client, 'configBatchWrite').mockImplementation(async params => {
+            if (!raced) {
+                raced = true;
+                await write({edits: [{
+                    keyPath: 'projects', mergeStrategy: 'upsert',
+                    value: kind === 'refusal' ? {[cwd]: {trust_level: 'untrusted'}}
+                        : {'/synthetic/other': {trust_level: 'untrusted'}},
+                }]});
+            }
+            return await write(params);
+        });
+        await expect(ensureProjectTrust(client, cwd)).rejects.toMatchObject({
+            data: {config_write_error_code: 'configVersionConflict'},
+        });
+        const after = await client.configRead({includeLayers: true});
+        expect(after.config['projects']).toEqual(kind === 'refusal'
+            ? {[cwd]: {trust_level: 'untrusted'}}
+            : {'/synthetic/other': {trust_level: 'untrusted'}});
+    });
+
+    it('rejects a missing execution directory without saving trust', async () => {
+        await expect(ensureProjectTrust(client, path.join(cwd, 'missing'))).rejects.toMatchObject({code: 'ENOENT'});
+        expect((await client.configRead({includeLayers: true})).config['projects']).toBeNull();
+    });
+
+    it('does not open a session when persisting trust fails', async () => {
+        const acpClient = new CodexAcpClient(client);
+        let opened = false;
+        vi.spyOn(client, 'configBatchWrite').mockRejectedValue(new Error('configuration is read-only'));
+        vi.spyOn(client, 'threadStart').mockImplementation(async () => {
+            opened = true;
+            throw new Error('thread must not open');
+        });
+        await expect(acpClient.newSession({cwd, mcpServers: []})).rejects.toThrow('configuration is read-only');
+        expect(opened).toBe(false);
+        expect((await client.configRead({includeLayers: true})).config['projects']).toBeNull();
     });
 });

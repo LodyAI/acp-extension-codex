@@ -1,3 +1,4 @@
+import {ensureProjectTrust} from "./ProjectTrust";
 import {readStartupModelConfig} from "./ModelConfigOption";
 import {readWorktreeProject, WorktreeProjects} from "./WorktreeProject";
 import {
@@ -688,7 +689,6 @@ export class CodexAcpClient {
     ): Promise<SessionMetadata> {
         const project = readWorktreeProject(request._meta);
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
-        await this.refreshSkills(request.cwd, additionalDirectories);
 
         const sessionConfig = await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? [], request._meta);
         const response = await this.resumeThread({
@@ -723,7 +723,6 @@ export class CodexAcpClient {
         return await runForkSession(request, additionalDirectories, {
             codexClient: this.codexClient,
             backfillProject: (thread, project) => this.worktreeProjects.backfill(thread, project),
-            refreshSkills: (cwd, directories) => this.refreshSkills(cwd, directories),
             createSessionConfig: (cwd, directories, mcpServers, meta) =>
                 this.createSessionConfig(cwd, directories, mcpServers, meta),
             getResumeModelProvider: () => this.getResumeModelProvider(),
@@ -738,7 +737,6 @@ export class CodexAcpClient {
     async loadSession(request: acp.LoadSessionRequest, onSubscribed?: () => void): Promise<SessionMetadataWithThread> {
         const project = readWorktreeProject(request._meta);
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
-        await this.refreshSkills(request.cwd, additionalDirectories);
 
         const sessionConfig = await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? [], request._meta);
         const response = await this.resumeThread({
@@ -819,7 +817,6 @@ export class CodexAcpClient {
     async newSession(request: acp.NewSessionRequest, onSubscribed?: (sessionId?: string) => void): Promise<SessionMetadata> {
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         const developerInstructions = airCustomInstructions(request._meta);
-        await this.refreshSkills(request.cwd, additionalDirectories);
 
         const project = readWorktreeProject(request._meta);
         const projectId = await this.worktreeProjects.resolve(project);
@@ -978,6 +975,8 @@ export class CodexAcpClient {
         mcpServers: Array<acp.McpServer>,
         meta?: unknown,
     ): Promise<SessionConfig> {
+        const projectTrust = await ensureProjectTrust(this.codexClient, projectPath);
+        await this.refreshSkills(projectPath, additionalDirectories);
         const sessionRoots = [projectPath, ...additionalDirectories];
         const activeProvider = this.gatewayConfig
             ? {
@@ -996,7 +995,7 @@ export class CodexAcpClient {
             ...forceGitRootTurnDiffPaths(mergeGatewayConfig(this.config, this.gatewayConfig)),
             ...readStartupModelConfig(meta),
             projects: Object.fromEntries(sessionRoots.map(root => [root, {
-                trust_level: "trusted",
+                trust_level: root === projectPath ? projectTrust : "trusted",
             }])),
         };
         const configWithWorkspaceRoots = mergeSandboxWorkspaceWriteRoots(mergedConfig, additionalDirectories);
