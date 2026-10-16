@@ -3009,7 +3009,8 @@ export class CodexAcpServer {
         unreadableChildren: Set<string>,
         isOpen: () => boolean,
     ): Promise<void> {
-        const session = new ACPSessionConnection(this.connection, sessionId);
+        const session = new ACPSessionConnection(
+            sessionState.subagents.connectionForEvents(this.connection), sessionId);
         const announced = new Map<string, {generation: number; sessionId: string; terminal: boolean}>();
         for await (const items of itemPages) {
             for (const item of items) {
