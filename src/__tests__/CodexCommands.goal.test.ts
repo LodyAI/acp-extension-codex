@@ -1,5 +1,5 @@
 import {describe, expect, it} from "vitest";
-import {GOAL_CONTINUATION_PROMPT, resolveGoalCommandHandleResult} from "../CodexCommands";
+import {resolveGoalCommandHandleResult} from "../CodexCommands";
 import {parseGoalPromptControl} from "../GoalExtension";
 import type {TurnCompletedNotification} from "../app-server/v2";
 
@@ -26,10 +26,9 @@ describe("resolveGoalCommandHandleResult", () => {
         });
     });
 
-    it("chains into goal continuation when no setup turn starts", () => {
+    it("leaves continuation to Codex when no setup turn starts", () => {
         expect(resolveGoalCommandHandleResult(null)).toEqual({
-            handled: false,
-            prompt: GOAL_CONTINUATION_PROMPT,
+            handled: true,
         });
     });
 

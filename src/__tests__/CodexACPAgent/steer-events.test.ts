@@ -68,6 +68,8 @@ describe('_lody/session/steer', () => {
             steerId: "steer-active",
         })).resolves.toEqual({outcome: "injected"});
 
+        // Every steer mints a fresh `clientUserMessageId` (Codex-side param only; no ACP wire
+        // change on v1).
         expect(turnSteerSpy).toHaveBeenCalledWith({
             threadId: "session-id",
             expectedTurnId: "turn-id",

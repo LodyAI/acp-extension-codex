@@ -1,0 +1,44 @@
+[
+  {
+    "messageId": "item-reasoning",
+    "content": {
+      "text": "Thinking ",
+      "type": "text"
+    },
+    "sessionUpdate": "agent_thought_chunk"
+  },
+  {
+    "messageId": "item-reasoning",
+    "content": {
+      "text": "hard",
+      "type": "text"
+    },
+    "sessionUpdate": "agent_thought_chunk"
+  },
+  {
+    "messageId": "item-agent",
+    "content": {
+      "text": "Hel",
+      "type": "text"
+    },
+    "_meta": {
+      "lody": {
+        "turnId": "turn-1"
+      }
+    },
+    "sessionUpdate": "agent_message_chunk"
+  },
+  {
+    "messageId": "item-agent",
+    "content": {
+      "text": "lo",
+      "type": "text"
+    },
+    "_meta": {
+      "lody": {
+        "turnId": "turn-1"
+      }
+    },
+    "sessionUpdate": "agent_message_chunk"
+  }
+]

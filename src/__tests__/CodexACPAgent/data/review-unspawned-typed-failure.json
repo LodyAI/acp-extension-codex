@@ -13,7 +13,7 @@
           "version": 1,
           "sessionFailure": {
             "id": "review-parent-turn:error",
-            "revision": 2,
+            "revision": 1,
             "category": "service",
             "severity": "error",
             "title": "Codex encountered an internal error.",

@@ -3,6 +3,7 @@ import type {
 } from "./ProjectApi";
 import {type MessageConnection, RequestType} from "vscode-jsonrpc/node";
 import {AppServerConnectionLostError, ConnectionLoss} from "./app-server-recovery/ConnectionLoss";
+import {explainCodexError} from "./CodexErrorExplanations";
 import {McpOauthCompletions} from "./mcp/McpOauthCompletions";
 import {McpStartupTracker} from "./mcp/McpStartupTracker";
 import type {
@@ -68,9 +69,13 @@ import type {
     ThreadListResponse,
     ThreadReadParams,
     ThreadReadResponse,
-    ThreadItem, ThreadItemEntry, ThreadItemsListParams, ThreadItemsListResponse, Turn,
     ThreadTurnsListParams,
     ThreadTurnsListResponse,
+    ThreadItem,
+    ThreadItemEntry,
+    ThreadItemsListParams,
+    ThreadItemsListResponse,
+    Turn,
     ThreadResumeParams,
     ThreadResumeResponse,
     ThreadSettings,
@@ -123,19 +128,19 @@ type ExperimentalThreadForkParams = ThreadForkParams & {
     excludeTurns?: boolean;
 };
 
-const CommandExecutionApprovalRequest = new RequestType<
+export const CommandExecutionApprovalRequest = new RequestType<
     CommandExecutionRequestApprovalParams,
     CommandExecutionRequestApprovalResponse,
     void
 >('item/commandExecution/requestApproval');
 
-const FileChangeApprovalRequest = new RequestType<
+export const FileChangeApprovalRequest = new RequestType<
     FileChangeRequestApprovalParams,
     FileChangeRequestApprovalResponse,
     void
 >('item/fileChange/requestApproval');
 
-const PermissionsApprovalRequest = new RequestType<
+export const PermissionsApprovalRequest = new RequestType<
     PermissionsRequestApprovalParams,
     PermissionsRequestApprovalResponse,
     void
@@ -186,6 +191,7 @@ export class CodexAppServerClient {
     private readonly staleTurnIds = new Map<string, Set<string>>();
     readonly connectionLoss: ConnectionLoss;
     private turnCompletionTerminalError: Error | null = null;
+    private codexHome: string | null = null;
 
     constructor(connection: MessageConnection) {
         this.connection = connection;
@@ -324,7 +330,9 @@ export class CodexAppServerClient {
     }
 
     async initialize(params: InitializeParams): Promise<InitializeResponse> {
-        return await this.sendRequest({ method: "initialize", params: params });
+        const response: InitializeResponse = await this.sendRequest({ method: "initialize", params: params });
+        this.codexHome = response?.codexHome ?? null;
+        return response;
     }
 
     async turnStart(params: TurnStartParams): Promise<TurnStartResponse> {
@@ -498,8 +506,11 @@ export class CodexAppServerClient {
         const whileConnected = <T>(wait: Promise<T>) => this.waitWhileConnected("the goal update", wait);
         try {
             const goalSetResponse = await this.threadGoalSet(params);
-            expectedGoal = goalSetResponse.goal;
+            // `/goal` records no user message, live or in history, so this response is the
+            // earliest signal that Codex accepted the command, whether or not a runtime turn
+            // ends up running.
             onAccepted?.();
+            expectedGoal = goalSetResponse.goal;
             onGoalSet?.(expectedGoal);
             if (capturedGoalUpdates.some(event => goalsMatch(event.goal, expectedGoal!))) {
                 goalUpdateHandled = true;
@@ -766,10 +777,10 @@ export class CodexAppServerClient {
             const items = page;
             const lastIndex = items.findIndex(entry => entry.item.id === lastItemId);
             if (lastIndex >= 0) {
-                yield items.slice(0, lastIndex + 1);
+                yield page.slice(0, lastIndex + 1);
                 return;
             }
-            yield items;
+            yield page;
         }
     }
 
@@ -1288,15 +1299,19 @@ export class CodexAppServerClient {
         }
         const loadedThreadId = threadLoadOf(request);
         let result: any;
-        if (loadedThreadId === null) {
-            if (request.params) {
-                result = await this.connection.sendRequest<R>(request.method, request.params)
+        try {
+            if (loadedThreadId === null) {
+                if (request.params) {
+                    result = await this.connection.sendRequest<R>(request.method, request.params)
+                }
+                else {
+                    result = await this.connection.sendRequest<R>(request.method);
+                }
+            } else {
+                result = await this.threadLoadGate(loadedThreadId, () => this.sendThreadLoad<R>(loadedThreadId, request));
             }
-            else {
-                result = await this.connection.sendRequest<R>(request.method);
-            }
-        } else {
-            result = await this.threadLoadGate(loadedThreadId, () => this.sendThreadLoad<R>(loadedThreadId, request));
+        } catch (err) {
+            throw err instanceof Error ? explainCodexError(err, {codexHome: this.codexHome}) : err;
         }
         for (const callback of this.codexEventHandlers) {
             callback({ eventType: "response", ...result});
@@ -1489,5 +1504,3 @@ async function withHistoryTimeout<T>(page: Promise<T>, method: string, threadId:
         clearTimeout(timer);
     }
 }
-
-export {CommandExecutionApprovalRequest, FileChangeApprovalRequest, PermissionsApprovalRequest};

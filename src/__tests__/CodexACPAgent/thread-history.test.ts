@@ -1,5 +1,5 @@
 import {describe, expect, it, vi} from "vitest";
-import type {Turn} from "../../app-server/v2";
+import type {ThreadItem, ThreadItemEntry, ThreadItemsListParams, ThreadTurnsListParams, Turn} from "../../app-server/v2";
 import {createCodexMockTestFixture, createTestModel} from "../acp-test-utils";
 
 function messageTurn(id: string): Turn {
@@ -13,6 +13,56 @@ function messageTurn(id: string): Turn {
         completedAt: null,
         durationMs: null,
     };
+}
+
+/**
+ * A fake of thread/turns/list over `stored`. A descending read without a
+ * cursor starts at the newest turn, and the cursor `turn:<id>` starts at that
+ * turn. An ascending read starts at the oldest turn.
+ */
+function turnStore(stored: Turn[], pageSize = 2) {
+    return async ({cursor, limit, sortDirection}: ThreadTurnsListParams) => {
+        if (sortDirection === "desc") {
+            const index = cursor === null || cursor === undefined
+                ? stored.length - 1
+                : stored.findIndex(turn => `turn:${turn.id}` === cursor);
+            const data = index < 0 ? [] : stored.slice(Math.max(0, index + 1 - (limit ?? 1)), index + 1).reverse();
+            return {data: data.map(turn => ({...turn, items: [], itemsView: "notLoaded" as const})), nextCursor: null, backwardsCursor: null};
+        }
+        const start = cursor === null || cursor === undefined ? 0 : Number(cursor.slice("asc:".length));
+        const end = start + Math.min(limit ?? pageSize, pageSize);
+        return {data: stored.slice(start, end), nextCursor: end < stored.length ? `asc:${end}` : null, backwardsCursor: null};
+    };
+}
+
+/**
+ * A fake of thread/items/list over the items of `turns`. A descending read
+ * without a cursor starts at the newest item, and the cursor `item:<id>`
+ * starts at that item. An ascending read starts at the oldest item.
+ */
+function itemStore(turns: Turn[], pageSize = 2) {
+    const entries = turns.flatMap(turn => turn.items.map(item => ({turnId: turn.id, item, startedAtMs: null, completedAtMs: null})));
+    return async ({turnId, cursor, limit, sortDirection}: ThreadItemsListParams) => {
+        if (cursor !== null && typeof cursor === "object") {
+            throw new Error("This history fixture only supports opaque string cursors");
+        }
+        const scoped = entries.filter(entry => !turnId || entry.turnId === turnId);
+        if (sortDirection === "desc") {
+            const index = cursor === null || cursor === undefined
+                ? scoped.length - 1
+                : scoped.findIndex(entry => `item:${entry.item.id}` === cursor);
+            return {data: index < 0 ? [] : [scoped[index]!], nextCursor: null, backwardsCursor: null};
+        }
+        const start = cursor === null || cursor === undefined ? 0 : Number(cursor.slice("asc:".length));
+        const end = start + Math.min(limit ?? pageSize, pageSize);
+        return {data: scoped.slice(start, end), nextCursor: end < scoped.length ? `asc:${end}` : null, backwardsCursor: null};
+    };
+}
+
+async function collect(history: AsyncIterable<Array<ThreadItem | ThreadItemEntry>> | null): Promise<string[]> {
+    const ids: string[] = [];
+    for await (const page of history ?? []) ids.push(...page.map(item => "turnId" in item ? item.item.id : item.id));
+    return ids;
 }
 
 describe("paginated thread history", () => {
