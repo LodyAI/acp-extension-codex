@@ -38,25 +38,19 @@ export type CommandHandleResult =
 /** Codex rejects longer objectives; fail before spending a turn on it. */
 const GOAL_OBJECTIVE_MAX_LENGTH = 4000;
 
-export const GOAL_CONTINUATION_PROMPT: acp.ContentBlock[] = [{
-    type: "text",
-    text: "Continue working toward the active goal.",
-}];
+export type PromptKind =
+    | { kind: "prompt" }
+    | { kind: "localCommand", name: string }
+    | { kind: "codexTurnCommand", name: string };
 
-/**
- * Slash `/goal set|resume` can finish a short Codex setup turn before real work
- * begins. Native Codex CLI continues active goals at idle via `on_thread_idle`;
- * If Codex started a turn, the ACP prompt follows its native goal continuations.
- * Only bootstrap with an explicit prompt when goal setup started no turn at all;
- * starting another turn after a completed setup races Codex's idle scheduler.
- */
+/** Native Codex owns goal continuation, including setup with no observed turn. */
 export function resolveGoalCommandHandleResult(
     turnCompleted: TurnCompletedNotification | null,
 ): CommandHandleResult {
     if (turnCompleted !== null) {
         return { handled: true, turnCompleted };
     }
-    return { handled: false, prompt: GOAL_CONTINUATION_PROMPT };
+    return { handled: true };
 }
 
 export type CommandHandleOptions = {
@@ -79,8 +73,6 @@ export class CodexCommands {
     private readonly runWithProcessCheck: <T>(operation: () => Promise<T>) => Promise<T>;
     private readonly onLogout: LogoutHandler;
     private readonly mcpCommand: McpCommand;
-    /** The commands that each session got last, to skip a publish that changes nothing. */
-    private readonly published = new WeakMap<SessionState, string>();
 
     constructor(
         connection: AcpClientConnection,
@@ -759,8 +751,3 @@ export class CodexCommands {
         return count.toString();
     }
 }
-
-export type PromptKind =
-    | { kind: "prompt" }
-    | { kind: "localCommand", name: string }
-    | { kind: "codexTurnCommand", name: string };

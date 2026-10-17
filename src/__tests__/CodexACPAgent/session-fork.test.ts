@@ -105,6 +105,7 @@ describe("ACP session fork", () => {
                     } as never,
                     releaseFailedFork: async threadId => { await threadUnsubscribe({threadId}); },
                     backfillProject: vi.fn().mockRejectedValue(backfillError),
+                    forkCreated: vi.fn(),
                     createSessionConfig: vi.fn().mockResolvedValue({}),
                     getResumeModelProvider: vi.fn().mockResolvedValue("openai"),
                     fetchAvailableModels: vi.fn(),
@@ -155,7 +156,9 @@ describe("ACP session fork", () => {
             sessionId: "source-id",
             cwd: "/workspace",
             mcpServers: [],
-        }, expect.any(Function));
+        }, expect.any(Function), expect.any(Function));
+        // Regression pin: v1 must keep sending `modes` (v2 drops it via `forkSessionV2`).
+        expect(response.modes).toBeDefined();
     });
 
     it("waits for MCP startup before completing session fork", async () => {

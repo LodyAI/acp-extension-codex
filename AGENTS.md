@@ -24,8 +24,10 @@
 - Lody may launch the adapter from an Electron or daemon process with no Windows console.
   Set `windowsHide: true` on every adapter-owned console-subsystem child process spawn;
   `ELECTRON_RUN_AS_NODE` is a separate runtime-mode concern.
+- The adapter serves ACP v1 and v2. A change that is not meant for one protocol version only must work correctly in both.
 - When updating discriminated-union/event `switch` statements, do not add a trailing fallback like `return null` only to satisfy TypeScript.
 - Handle each variant with an explicit `case`; if intentionally ignored, use an explicit no-op case.
+- Code comments should be concise and in plain language; avoid verbosity and overly specific detail.
 
 ## Testing Guidelines
 
@@ -34,6 +36,7 @@
 - Prefer snapshot-based tests using `toMatchFileSnapshot()` over inline assertions.
 - When snapshot response data drifts, prefer replacing that response payload with a stable placeholder over asserting fragile fields (except for 'model/list').
 - Focus on behavior and outputs rather than implementation details.
+- Cover both ACP v1 and v2 when a change affects what a client receives (updates, responses, replay). A change to internal logic only does not need its tests duplicated per version.
 - Use `/run-codex` skill (`.claude/skills/run-codex/`) to test with real Codex and observe actual events.
 
 ## Docs

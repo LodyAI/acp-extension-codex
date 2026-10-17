@@ -97,7 +97,6 @@ describe("CodexACPAgent - list sessions", () => {
             sourceKinds: [
                 "cli",
                 "vscode",
-                "exec",
                 "appServer",
                 "unknown",
             ],

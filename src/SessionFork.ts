@@ -11,6 +11,7 @@ import type {ServiceTier} from "./app-server/ServiceTier";
 import type {Model} from "./app-server/v2";
 import type {SessionMetadata} from "./SessionMetadata";
 import {getLodyForkTurnId} from "./AcpExtensions";
+import type {AcpMcpServer, WithAcpMcpServers} from "./McpServerConfig";
 
 export type SessionForkDependencies = {
     codexClient: CodexAppServerClient;
@@ -18,7 +19,7 @@ export type SessionForkDependencies = {
     createSessionConfig(
         cwd: string,
         additionalDirectories: string[],
-        mcpServers: acp.McpServer[],
+        mcpServers: AcpMcpServer[],
         meta?: unknown,
     ): Promise<SessionConfig>;
     getResumeModelProvider(): Promise<string>;
@@ -27,10 +28,12 @@ export type SessionForkDependencies = {
     getCollaborationMode(sessionId: string): ModeKind;
     /** Gives back the subscription of a fork that failed after `thread/fork`, unless another open of it began. */
     releaseFailedFork(threadId: string): Promise<void>;
+    /** `thread/fork` answered with the thread of the fork. */
+    forkCreated(threadId: string): void;
 };
 
 export async function forkSession(
-    request: acp.ForkSessionRequest,
+    request: WithAcpMcpServers<acp.ForkSessionRequest>,
     additionalDirectories: string[],
     dependencies: SessionForkDependencies,
 ): Promise<SessionMetadata> {
@@ -50,6 +53,7 @@ export async function forkSession(
         modelProvider: await dependencies.getResumeModelProvider(),
         threadId: request.sessionId,
     });
+    dependencies.forkCreated(response.thread.id);
     // `thread/fork` subscribes this connection to the new thread, and only to it: the source thread keeps the
     // subscription it had. The fork stays subscribed, as ACP lets the client prompt it at once. Codex keeps an
     // unsubscribed thread loaded and runs its turns, but sends their notifications to subscribers only.
@@ -75,7 +79,7 @@ export async function forkSession(
 }
 
 async function resolveForkTurnId(
-    request: acp.ForkSessionRequest,
+    request: Pick<acp.ForkSessionRequest, "sessionId" | "_meta">,
     codexClient: CodexAppServerClient,
 ): Promise<string | undefined> {
     const lodyTurnId = getLodyForkTurnId(request._meta);
