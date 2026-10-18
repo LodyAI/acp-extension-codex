@@ -27,7 +27,11 @@ import {ClientCapabilities} from "../tool-calls/ClientCapabilities";
 /** Synthetic session fixtures have no real workspace; native trust has its own integration coverage. */
 export function mockProjectTrust(): void {
     const trust = vi.spyOn(projectTrust, "ensureProjectTrust").mockResolvedValue("trusted");
-    onTestFinished(() => trust.mockRestore());
+    // Fixtures built in a `beforeAll` (the recorded scenarios) are outside any
+    // test, where `onTestFinished` throws; the spy then lives for that file.
+    if (expect.getState().currentTestName !== undefined) {
+        onTestFinished(() => trust.mockRestore());
+    }
 }
 
 export type MethodCallEvent = { method: string; args: any[] };
