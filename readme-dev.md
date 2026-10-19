@@ -168,6 +168,11 @@ performed. See [the protocol](https://learn.chatgpt.com/docs/app-server#read-a-s
 
 ## Codex 0.154 compatibility
 
+The production `createAcpAgentRouter` registers Core `sessionHistoryRead` and
+`rateLimitsGet` on both ACP v1 and v2. History transport tests must use this router,
+not the legacy `createCodexAcpApp` assembly, so advertised capabilities are tested
+against the entry point used by `src/index.ts`.
+
 The Core session-history endpoint and steer reconciliation use the same read-only
 history reader as session loading. Paging never resumes a thread or replays input.
 Loading uses the resume cursor to separate stored history from live events.
