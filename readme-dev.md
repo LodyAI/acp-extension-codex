@@ -502,3 +502,16 @@ the Codex config are not listed.
 - Open question for AIR: AIR's fork points match Codex item ids, but on v2 a user message's
   rendered id is the client-minted `clientId` (when the client supplied one), not the Codex item id.
   A fork at a user message would not resolve. This is flagged for AIR, not fixed here.
+
+### Prompt suggestions
+
+ACP v1 and v2 advertise `_meta.lody.promptSuggestions: {version: 1}` in their
+agent capability object. Clients declaring the same capability receive
+`_lody/session/prompt_suggestion` notifications for the owning root thread,
+including after a prompt finishes. `thread/prediction/updated` preserves
+`sourceTurnId` and its completed/text-null/failed result without creating assistant
+messages or changing prompt outcomes. No request is made to generate predictions;
+native runtime settings and availability remain authoritative.
+
+The prompt-suggestion contract is provided by the pinned
+`acp-extension-core@0.3.0` dependency.

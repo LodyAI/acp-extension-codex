@@ -874,6 +874,7 @@ export class CodexAcpServer {
                 version: packageJson.version,
             },
             capabilities: {
+                _meta: {lody: {promptSuggestions: CODEX_LODY_CAPABILITIES.promptSuggestions}},
                 auth: {
                     _meta: {
                         // Presence means "this agent pushes `_auth/status_update`".

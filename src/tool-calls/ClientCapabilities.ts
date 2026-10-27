@@ -1,3 +1,4 @@
+import {supportsLodyPromptSuggestions} from "acp-extension-core";
 import type * as acp from "@agentclientprotocol/sdk/unstable";
 import {
     AIR_DIFF_PATCH_KEY,
@@ -27,6 +28,7 @@ export type AirCapabilities = {
 };
 
 type ClientCapabilityValues = {
+    readonly promptSuggestions: boolean;
     readonly airClient: boolean;
     readonly airToolCallContract: boolean;
     readonly terminalOutput: boolean;
@@ -45,7 +47,9 @@ type ClientCapabilityValues = {
  * Every other client gets the reports of the adapter before the contract, see `StandardToolCallFields`.
  */
 export class ClientCapabilities {
+    readonly promptSuggestions: boolean;
     static readonly DEFAULT = new ClientCapabilities({
+        promptSuggestions: false,
         airClient: false,
         airToolCallContract: false,
         terminalOutput: false,
@@ -72,6 +76,7 @@ export class ClientCapabilities {
     readonly permissionPromptFields: boolean;
 
     private constructor(values: ClientCapabilityValues) {
+        this.promptSuggestions = values.promptSuggestions;
         this.airClient = values.airClient;
         this.airToolCallContract = values.airToolCallContract;
         this.terminalOutput = values.terminalOutput;
@@ -86,6 +91,7 @@ export class ClientCapabilities {
         const airClient = isAirClient(capabilities);
         const diffPatch = clientSupportsAirCapability(capabilities, AIR_DIFF_PATCH_KEY);
         return new ClientCapabilities({
+            promptSuggestions: supportsLodyPromptSuggestions(capabilities),
             airClient,
             airToolCallContract: airClient,
             terminalOutput: capabilities?._meta?.["terminal_output"] === true,
@@ -111,6 +117,7 @@ export class ClientCapabilities {
      */
     static fromV2(capabilities: acp.ClientCapabilities | null | undefined): ClientCapabilities {
         return new ClientCapabilities({
+            promptSuggestions: supportsLodyPromptSuggestions(capabilities),
             airClient: isAirClient(capabilities),
             airToolCallContract: false,
             terminalOutput: true,
