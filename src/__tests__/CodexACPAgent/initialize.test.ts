@@ -74,6 +74,11 @@ describe('CodexACPAgent - initialize', () => {
         });
     });
 
+    it('advertises prompt suggestions to v2 clients', async () => {
+        const result = await agent.initializeV2({protocolVersion: 2, info: {name: "test", version: "1"}});
+        expect(result.capabilities?._meta?.["lody"]).toMatchObject({promptSuggestions: {version: 1}});
+    });
+
     it('should advertise gateway auth when the client opts into gateway auth metadata', async () => {
         const params: acp.InitializeRequest = {
             protocolVersion: acp.PROTOCOL_VERSION,

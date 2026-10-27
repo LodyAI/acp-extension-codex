@@ -1,3 +1,4 @@
+import {LODY_EXTENSION_METHODS, type LodyPromptSuggestion} from "acp-extension-core";
 import {CodexSubagentEventRouter} from "./subagents/CodexSubagentEventRouter";
 import {randomUUID} from "node:crypto";
 import type {RateLimitSnapshot} from "./app-server/v2";
@@ -795,7 +796,7 @@ export class CodexEventHandler {
                 // The server lists the skills again and publishes the commands. The change itself is no update.
                 return null;
             // ignored events
-            // Read markers and predictions have no ACP session update counterpart.
+            // These events have no standard ACP session update counterpart.
             case "thread/readState/changed":
             case "thread/prediction/updated":
             case "thread/deleted":
@@ -850,6 +851,16 @@ export class CodexEventHandler {
     }
 
     private async emitExtNotification(notification: ServerNotification): Promise<void> {
+        if (notification.method === "thread/prediction/updated"
+            && notification.params.threadId === this.sessionState.sessionId
+            && this.sessionState.clientCapabilities.promptSuggestions) {
+            const update: LodyPromptSuggestion = {
+                sessionId: this.sessionState.sessionId,
+                sourceTurnId: notification.params.sourceTurnId,
+                result: notification.params.result,
+            };
+            await this.notifyExt(LODY_EXTENSION_METHODS.sessionPromptSuggestion, update);
+        }
         if (notification.method === "thread/tokenUsage/updated"
             && notification.params.threadId === this.sessionState.sessionId) {
             this.sessionState.turnUsage ??= new CodexTurnUsage();

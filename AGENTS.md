@@ -113,3 +113,9 @@
   projects by probing deterministic `:gN` idempotency generations; only Codex's specific
   tombstone error advances a generation. Project protocol fields omitted by stable
   generation live in `ProjectApi.ts`, based on the pinned runtime's experimental schema.
+
+## Prompt suggestions
+
+- Gate Core suggestion notifications on the client's `promptSuggestions` v1.
+  Keep them outside assistant content and prompt lifecycle. Preserve native
+  identity; never assign the receiving turn as the suggestion's source.
