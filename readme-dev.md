@@ -513,6 +513,5 @@ including after a prompt finishes. `thread/prediction/updated` preserves
 messages or changing prompt outcomes. No request is made to generate predictions;
 native runtime settings and availability remain authoritative.
 
-The new types/helpers require the companion Core change in this workspace.
-Standalone release must update the pinned Core dependency after that release is
-published; the existing npm pin does not contain this contract yet.
+The prompt-suggestion contract is provided by the pinned
+`acp-extension-core@0.3.0` dependency.
