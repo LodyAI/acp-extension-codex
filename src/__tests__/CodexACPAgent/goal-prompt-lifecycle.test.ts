@@ -8,7 +8,7 @@ const goal: ThreadGoal = {
     tokenBudget: null, tokensUsed: 0, timeUsedSeconds: 0, createdAt: 1, updatedAt: 1,
 };
 const turn = (id: string, status: Turn["status"] = "completed"): Turn => ({
-    id, status, items: [], itemsView: "notLoaded", error: null,
+    id, status, items: [], rootTurnId: null, itemsView: "notLoaded", error: null,
     startedAt: null, completedAt: null, durationMs: null,
 });
 

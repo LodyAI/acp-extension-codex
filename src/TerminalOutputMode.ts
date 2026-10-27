@@ -1,4 +1,4 @@
-import type * as acp from "@agentclientprotocol/sdk";
+import type * as acp from "@agentclientprotocol/sdk/unstable";
 
 export type TerminalOutputMode = "terminal_output" | "terminal_output_delta";
 

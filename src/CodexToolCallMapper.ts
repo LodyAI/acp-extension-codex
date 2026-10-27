@@ -1,4 +1,4 @@
-import type { ContentBlock, ToolCallContent } from "@agentclientprotocol/sdk";
+import type { ContentBlock, ToolCallContent } from "@agentclientprotocol/sdk/unstable";
 import { applyPatch, parsePatch, reversePatch, type StructuredPatch } from "diff";
 import { DiffStatsCalculator } from "./DiffStats";
 import { AIR_DIFF_STATS_KEY, withAirMeta } from "./AirExtension";
@@ -818,7 +818,7 @@ function imageGenerationContent(
         }));
     }
 
-    if (item.result.trim() !== "") {
+    if ("result" in item && item.result.trim() !== "") {
         const image: ContentBlock = item.savedPath && item.savedPath.trim() !== ""
             ? {
                 type: "image",
@@ -843,7 +843,7 @@ function imageGenerationRawOutput(
     const output: Record<string, string | null> = {
         status: item.status,
         revisedPrompt: item.revisedPrompt,
-        result: item.result,
+        ...("result" in item ? {result: item.result} : {fileId: item.fileId}),
     };
     if ("savedPath" in item) {
         output["savedPath"] = item.savedPath ?? null;

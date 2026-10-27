@@ -16,7 +16,7 @@ describe("CodexAppServerClient turn lifecycle", () => {
             sendRequest,
         } as unknown as MessageConnection);
         const turn = (id: string, status: "inProgress" | "completed" | "interrupted" | "failed") => ({
-            id, status, items: [], itemsView: "notLoaded" as const,
+            id, status, items: [], rootTurnId: null, itemsView: "notLoaded" as const,
             error: null, startedAt: null, completedAt: null, durationMs: null,
         });
         return {
@@ -133,7 +133,7 @@ describe("CodexAppServerClient turn lifecycle", () => {
     it("buffers a native review start that arrives before the review response", async () => {
         let notify: (event: ServerNotification) => void = () => {};
         const turn = (id: string, status: "inProgress" | "interrupted") => ({
-            id, status, items: [], itemsView: "notLoaded" as const,
+            id, status, items: [], rootTurnId: null, itemsView: "notLoaded" as const,
             error: null, startedAt: null, completedAt: null, durationMs: null,
         });
         let acknowledgeReview: (response: unknown) => void = () => {};
@@ -179,7 +179,7 @@ describe("CodexAppServerClient turn lifecycle", () => {
     it("does not treat an unrelated native terminal as the review completion", async () => {
         let notify: (event: ServerNotification) => void = () => {};
         const turn = (id: string, status: "inProgress" | "completed" | "interrupted") => ({
-            id, status, items: [], itemsView: "notLoaded" as const,
+            id, status, items: [], rootTurnId: null, itemsView: "notLoaded" as const,
             error: null, startedAt: null, completedAt: null, durationMs: null,
         });
         const connection = {

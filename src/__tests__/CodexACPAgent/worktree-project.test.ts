@@ -60,6 +60,7 @@ describe("local project identity across worktrees", () => {
             cwd, projectId: "adapter-project", modelProvider: null,
             config: {
                 features: {cwd_relative_turn_diffs: false},
+                skills: {config: [{name: "visualize:visualize", enabled: false}]},
                 projects: {[cwd]: {trust_level: "trusted"}},
             },
         });
@@ -298,6 +299,7 @@ describe("local project identity across worktrees", () => {
             cwd: root, modelProvider: null,
             config: {
                 features: {cwd_relative_turn_diffs: false},
+                skills: {config: [{name: "visualize:visualize", enabled: false}]},
                 projects: {[root]: {trust_level: "trusted"}},
             },
         });

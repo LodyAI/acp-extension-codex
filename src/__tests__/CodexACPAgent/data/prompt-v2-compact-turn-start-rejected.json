@@ -1,11 +1,8 @@
 [
   {
     "promptError": {
-      "code": -32603,
-      "message": "Internal error",
-      "data": {
-        "details": "Cannot compact now"
-      }
+      "code": -32600,
+      "message": "Cannot compact now"
     }
   }
 ]

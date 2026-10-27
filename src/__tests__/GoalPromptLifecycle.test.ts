@@ -4,7 +4,7 @@ import type {ThreadGoalStatus, TurnCompletedNotification} from "../app-server/v2
 
 function completion(id: string, status: "completed" | "interrupted" | "failed" = "completed"): TurnCompletedNotification {
     return {threadId: "session", turn: {
-        id, status, items: [], itemsView: "notLoaded", error: null,
+        id, status, items: [], rootTurnId: null, itemsView: "notLoaded", error: null,
         startedAt: null, completedAt: null, durationMs: null,
     }};
 }

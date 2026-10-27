@@ -1,7 +1,7 @@
 import {createHash} from "node:crypto";
 import {realpath} from "node:fs/promises";
 import path from "node:path";
-import {RequestError} from "@agentclientprotocol/sdk";
+import {RequestError} from "@agentclientprotocol/sdk/unstable";
 import type {LodyWorktreeProject} from "acp-extension-core";
 import {ErrorCodes, ResponseError} from "vscode-jsonrpc/node";
 import type {CodexAppServerClient} from "./CodexAppServerClient";

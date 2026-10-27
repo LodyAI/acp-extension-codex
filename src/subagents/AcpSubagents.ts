@@ -1,14 +1,16 @@
 import type {
     ClientCapabilities,
     SessionCapabilities,
-} from "@agentclientprotocol/sdk";
+} from "@agentclientprotocol/sdk/unstable";
 import {supportsLodySubagentEvents} from "acp-extension-core";
 import {
     AIR_NATIVE_SUBAGENT_SESSIONS_KEY,
     clientSupportsAirCapability,
+    isAirClient,
 } from "../AirExtension";
+import type * as acpV2 from "@agentclientprotocol/sdk/experimental/v2/unstable";
 
-/** Temporary typed surface for agentclientprotocol/agent-client-protocol#1992. */
+/** AIR's private contract, retained independently of standard subagent sessions. */
 export type SubagentSessionCapabilities = {
     cancel?: boolean;
     close?: boolean;
@@ -37,16 +39,23 @@ export type SubagentAwareSessionCapabilities = SessionCapabilities & {
     subagents?: Record<string, never>;
 };
 
-export function clientSupportsSubagents(
+export type StandardSubagentUpdate = Omit<acpV2.SubagentUpdate, "capabilities"> & {
+    sessionUpdate: "subagent_update";
+    capabilities?: Pick<acpV2.SubagentSessionCapabilities, "cancel">;
+};
+
+export function subagentProtocol(
     capabilities?: ClientCapabilities | null,
-): boolean {
-    if (supportsLodySubagentEvents(capabilities)) return true;
+    version: 1 | 2 = 1,
+): "hidden" | "air" | "standard" {
+    if (supportsLodySubagentEvents(capabilities)) return "air";
     const subagents = (
         capabilities as (ClientCapabilities & { subagents?: unknown }) | null | undefined
     )?.subagents;
-    if (typeof subagents === "object" && subagents !== null && !Array.isArray(subagents)) {
-        return true;
-    }
-
-    return clientSupportsAirCapability(capabilities, AIR_NATIVE_SUBAGENT_SESSIONS_KEY);
+    const standard = typeof subagents === "object" && subagents !== null && !Array.isArray(subagents);
+    const air = isAirClient(capabilities);
+    if (clientSupportsAirCapability(capabilities, AIR_NATIVE_SUBAGENT_SESSIONS_KEY)
+        || (version === 1 && air && standard)) return "air";
+    if (air) return "hidden";
+    return version === 2 || standard ? "standard" : "hidden";
 }

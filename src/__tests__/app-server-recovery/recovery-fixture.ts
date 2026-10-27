@@ -1,5 +1,5 @@
 import {mockProjectTrust} from "../acp-test-utils";
-import * as acp from "@agentclientprotocol/sdk";
+import * as acp from "@agentclientprotocol/sdk/unstable";
 import {vi} from "vitest";
 import {CodexAcpServer, type CodexProcessState} from "../../CodexAcpServer";
 import {CodexAcpClient} from "../../CodexAcpClient";

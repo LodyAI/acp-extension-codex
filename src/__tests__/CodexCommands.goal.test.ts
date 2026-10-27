@@ -9,7 +9,7 @@ const completedTurn = (status: TurnCompletedNotification["turn"]["status"]): Tur
         id: "turn-1",
         status,
         items: [],
-        itemsView: "summary",
+        rootTurnId: null, itemsView: "summary",
         error: null,
         startedAt: null,
         completedAt: null,

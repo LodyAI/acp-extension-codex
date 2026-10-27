@@ -5,8 +5,8 @@
  */
 
 import path from "node:path";
-import type * as acp from "@agentclientprotocol/sdk";
-import {RequestError} from "@agentclientprotocol/sdk";
+import type * as acp from "@agentclientprotocol/sdk/unstable";
+import {RequestError} from "@agentclientprotocol/sdk/unstable";
 import {ACPSessionConnection, type AcpClientConnection} from "./ACPSessionConnection";
 import {clientSupportsAirCapability, withAirMeta} from "./AirExtension";
 import type {ServerNotification} from "./app-server";
@@ -19,6 +19,7 @@ import type {Thread} from "./app-server/v2";
 import {
     AIR_ARCHIVED_KEY,
     AIR_SESSION_ARCHIVE_KEY,
+    AIR_SESSION_BATCH_GET_KEY,
     AIR_SESSION_INDEX_KEY,
     AIR_SESSION_LIST_SUBSCRIBE_KEY,
     AIR_SESSION_RENAME_KEY,
@@ -26,6 +27,7 @@ import {
     readSessionIndexListOptions,
     readSessionIndexPage,
     SESSION_ARCHIVE_METHOD,
+    SESSION_BATCH_GET_METHOD,
     SESSION_LIST_CHANGES_METHOD,
     SESSION_LIST_SUBSCRIBE_METHOD,
     SESSION_LIST_UNSUBSCRIBE_METHOD,
@@ -34,6 +36,8 @@ import {
     SessionIndexActivity,
     sessionIndexSessionInfo,
     type SessionArchiveRequest,
+    type SessionBatchGetRequest,
+    type SessionBatchGetResponse,
     type SessionIndexListOptions,
     type SessionRenameRequest,
 } from "./SessionIndex";
@@ -43,6 +47,7 @@ import {canonicalCwds, CodexWorktreeMarks, isUncPath, linkedWorktreeCwds} from "
 import {SessionForkOrigins} from "./SessionForkOrigins";
 import {SessionListSubscriptions, type SessionListSubscriptionTimings, type ThreadEntry} from "./SessionListSubscriptions";
 import {SessionWriteQueue} from "./SessionWriteQueue";
+import {readSessionBatchMetadata} from "./SessionBatchGet";
 
 /** What the session index needs from `CodexAcpServer`. */
 export interface SessionIndexHost {
@@ -110,7 +115,7 @@ export class SessionIndexService {
      */
     agentCapabilities(): string[] {
         return this.enabled
-            ? [AIR_SESSION_INDEX_KEY, AIR_SESSION_ARCHIVE_KEY, AIR_SESSION_RENAME_KEY, AIR_SESSION_LIST_SUBSCRIBE_KEY, AIR_SESSION_WORKTREES_KEY]
+            ? [AIR_SESSION_INDEX_KEY, AIR_SESSION_BATCH_GET_KEY, AIR_SESSION_ARCHIVE_KEY, AIR_SESSION_RENAME_KEY, AIR_SESSION_LIST_SUBSCRIBE_KEY, AIR_SESSION_WORKTREES_KEY]
             : [];
     }
 
@@ -150,6 +155,18 @@ export class SessionIndexService {
         const options = readSessionIndexListOptions(params._meta);
         const cwd = params.cwd?.trim() || null;
         return await this.readRows(cwd, options, params.cursor ?? null);
+    }
+
+    /** Metadata only: no adapter list paging, session load/resume or history replay. */
+    async batchGet({sessionIds}: SessionBatchGetRequest): Promise<SessionBatchGetResponse> {
+        this.require(SESSION_BATCH_GET_METHOD);
+        if (sessionIds.length === 0) return {sessions: []};
+        await this.host.ensureAppServer();
+        const client = this.host.client();
+        const entries = await this.host.runWithProcessCheck(() => readSessionBatchMetadata(
+            client.appServerClient, client.getHomePath(), sessionIds,
+        ));
+        return {sessions: await this.rows(entries, true)};
     }
 
     /**

@@ -1,5 +1,5 @@
 import {describe, expect, it, vi} from "vitest";
-import type {McpServerStdio} from "@agentclientprotocol/sdk";
+import type {McpServerStdio} from "@agentclientprotocol/sdk/unstable";
 import {forkSession} from "../../SessionFork";
 import {createCodexMockTestFixture, createTestModel} from "../acp-test-utils";
 import type {McpStartupResult} from "../../mcp/McpStartupTracker";
@@ -66,6 +66,7 @@ describe("ACP session fork", () => {
             modelProvider: "openai",
             config: {
                 features: {cwd_relative_turn_diffs: false},
+                skills: {config: [{name: "visualize:visualize", enabled: false}]},
                 projects: {
                     "/workspace": {trust_level: "trusted"},
                     "/workspace/extra": {trust_level: "trusted"},
@@ -156,7 +157,7 @@ describe("ACP session fork", () => {
             sessionId: "source-id",
             cwd: "/workspace",
             mcpServers: [],
-        }, expect.any(Function), expect.any(Function));
+        }, expect.any(Function), expect.any(Function), undefined);
         // Regression pin: v1 must keep sending `modes` (v2 drops it via `forkSessionV2`).
         expect(response.modes).toBeDefined();
     });

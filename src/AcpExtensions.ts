@@ -6,7 +6,7 @@ import type {
     NewSessionResponse,
     ResumeSessionResponse,
     SessionId,
-} from "@agentclientprotocol/sdk";
+} from "@agentclientprotocol/sdk/unstable";
 import {
     LODY_EXTENSION_METHODS,
     type LodyExtensionCapabilities,

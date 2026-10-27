@@ -1,5 +1,6 @@
-import type * as acp from "@agentclientprotocol/sdk";
+import type * as acp from "@agentclientprotocol/sdk/unstable";
 import {recordOrNull} from "./permissions/json";
+import type {InitializeCapabilities} from "./app-server";
 
 export function clientSupportsFormElicitation(
     clientCapabilities?: acp.ClientCapabilities | null

@@ -2,8 +2,8 @@ import type {LodyWorktreeProject} from "acp-extension-core";
 import {readWorktreeProject} from "./WorktreeProject";
 import type {Thread} from "./app-server/v2";
 import {createHash} from "node:crypto";
-import type * as acp from "@agentclientprotocol/sdk";
-import {RequestError} from "@agentclientprotocol/sdk";
+import type * as acp from "@agentclientprotocol/sdk/unstable";
+import {RequestError} from "@agentclientprotocol/sdk/unstable";
 import type {SessionConfig} from "./CodexAcpClient";
 import type {CodexAppServerClient} from "./CodexAppServerClient";
 import type {ModeKind} from "./app-server/ModeKind";
@@ -12,6 +12,7 @@ import type {Model} from "./app-server/v2";
 import type {SessionMetadata} from "./SessionMetadata";
 import {getLodyForkTurnId} from "./AcpExtensions";
 import type {AcpMcpServer, WithAcpMcpServers} from "./McpServerConfig";
+import type {SessionInstructions} from "./ClientSystemPrompt";
 
 export type SessionForkDependencies = {
     codexClient: CodexAppServerClient;
@@ -36,6 +37,7 @@ export async function forkSession(
     request: WithAcpMcpServers<acp.ForkSessionRequest>,
     additionalDirectories: string[],
     dependencies: SessionForkDependencies,
+    instructions?: SessionInstructions,
 ): Promise<SessionMetadata> {
     const project = readWorktreeProject(request._meta);
     const lastTurnId = await resolveForkTurnId(request, dependencies.codexClient);
@@ -52,6 +54,7 @@ export async function forkSession(
         ...(lastTurnId !== undefined && {lastTurnId}),
         modelProvider: await dependencies.getResumeModelProvider(),
         threadId: request.sessionId,
+        ...(instructions?.text !== undefined ? {developerInstructions: instructions.developerInstructions} : {}),
     });
     dependencies.forkCreated(response.thread.id);
     // `thread/fork` subscribes this connection to the new thread, and only to it: the source thread keeps the
@@ -75,6 +78,7 @@ export async function forkSession(
         currentServiceTier: response.serviceTier as ServiceTier ?? null,
         additionalDirectories,
         skippedMcpServers: sessionConfig.skippedMcpServers,
+        ...(instructions ? {instructions} : {}),
     };
 }
 

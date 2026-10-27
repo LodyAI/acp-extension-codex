@@ -1,4 +1,4 @@
-import * as acp from "@agentclientprotocol/sdk";
+import * as acp from "@agentclientprotocol/sdk/unstable";
 import * as acpV2 from "@agentclientprotocol/sdk/experimental/v2";
 import {describe, expect, it} from "vitest";
 import {CODEX_LODY_CAPABILITIES, LODY_RATE_LIMITS_GET_METHOD, LODY_READ_SESSION_HISTORY_METHOD} from "../AcpExtensions";

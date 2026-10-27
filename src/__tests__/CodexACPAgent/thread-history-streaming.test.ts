@@ -6,7 +6,7 @@ function messageTurn(id: string): Turn {
     return {
         id,
         items: [{type: "userMessage", id: `${id}-input`, clientId: null, content: [{type: "text", text: `Question ${id}`, text_elements: []}]}, {type: "agentMessage", id: `${id}-message`, text: `Answer ${id}`, phase: "final_answer", memoryCitation: null, delivery: null, questions: null}],
-        itemsView: "full",
+        rootTurnId: null, itemsView: "full",
         status: "completed",
         error: null,
         startedAt: null,
@@ -27,7 +27,7 @@ function turnStore(stored: Turn[], pageSize = 2) {
                 ? stored.length - 1
                 : stored.findIndex(turn => `turn:${turn.id}` === cursor);
             const data = index < 0 ? [] : stored.slice(Math.max(0, index + 1 - (limit ?? 1)), index + 1).reverse();
-            return {data: data.map(turn => ({...turn, items: [], itemsView: "notLoaded" as const})), nextCursor: null, backwardsCursor: null};
+            return {data: data.map(turn => ({...turn, items: [], rootTurnId: null, itemsView: "notLoaded" as const})), nextCursor: null, backwardsCursor: null};
         }
         const start = cursor === null || cursor === undefined ? 0 : Number(cursor.slice("asc:".length));
         const end = start + Math.min(limit ?? pageSize, pageSize);

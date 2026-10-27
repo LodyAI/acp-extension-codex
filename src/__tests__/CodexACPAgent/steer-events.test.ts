@@ -1,6 +1,6 @@
 import {beforeEach, describe, expect, it, vi} from 'vitest';
-import type * as acp from "@agentclientprotocol/sdk";
-import {RequestError} from "@agentclientprotocol/sdk";
+import type * as acp from "@agentclientprotocol/sdk/unstable";
+import {RequestError} from "@agentclientprotocol/sdk/unstable";
 import {createCodexMockTestFixture, createTestSessionState} from "../acp-test-utils";
 import type {SessionState} from "../../CodexAcpServer";
 import type {TurnCompletedNotification} from "../../app-server/v2";
@@ -10,6 +10,7 @@ function createTurn(id: string, status: "inProgress" | "completed" | "interrupte
     return {
         id,
         items: [],
+        rootTurnId: null,
         itemsView: "notLoaded" as const,
         status,
         error: null,

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import type * as acp from "@agentclientprotocol/sdk";
+import type * as acp from "@agentclientprotocol/sdk/unstable";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -91,6 +91,7 @@ describe("CodexACPAgent - loadSession", () => {
             name: null,
             turns: [{
                 id: `turn-${id}`,
+                rootTurnId: null,
                 itemsView: "full",
                 status: "completed",
                 error: null,
@@ -103,6 +104,8 @@ describe("CodexACPAgent - loadSession", () => {
         const root = makeThread("root-history", [
             {
                 type: "subAgentActivity",
+                model: null,
+                reasoningEffort: null,
                 id: "activity-child-1",
                 kind: "started",
                 agentThreadId: "child-history",
@@ -110,6 +113,8 @@ describe("CodexACPAgent - loadSession", () => {
             },
             {
                 type: "subAgentActivity",
+                model: null,
+                reasoningEffort: null,
                 id: "activity-child-1-terminal",
                 kind: "interrupted",
                 agentThreadId: "child-history",
@@ -117,6 +122,8 @@ describe("CodexACPAgent - loadSession", () => {
             },
             {
                 type: "subAgentActivity",
+                model: null,
+                reasoningEffort: null,
                 id: "activity-child-2",
                 kind: "started",
                 agentThreadId: "child-history",
@@ -124,6 +131,8 @@ describe("CodexACPAgent - loadSession", () => {
             },
             {
                 type: "subAgentActivity",
+                model: null,
+                reasoningEffort: null,
                 id: "activity-child-2-terminal",
                 kind: "interrupted",
                 agentThreadId: "child-history",
@@ -131,6 +140,8 @@ describe("CodexACPAgent - loadSession", () => {
             },
             {
                 type: "subAgentActivity",
+                model: null,
+                reasoningEffort: null,
                 id: "activity-orphan",
                 kind: "started",
                 agentThreadId: "orphan-history",
@@ -166,6 +177,7 @@ describe("CodexACPAgent - loadSession", () => {
         const firstChildTurn = child.turns[0]!;
         child.turns.push({
             id: "turn-child-history-2",
+            rootTurnId: firstChildTurn.rootTurnId,
             itemsView: firstChildTurn.itemsView,
             status: firstChildTurn.status,
             error: firstChildTurn.error,
@@ -251,6 +263,7 @@ describe("CodexACPAgent - loadSession", () => {
         appServer.listModels = vi.fn().mockResolvedValue({data: [model], nextCursor: null});
         const turn = (id: string, items: Thread["turns"][number]["items"]): Thread["turns"][number] => ({
             id,
+            rootTurnId: null,
             itemsView: "full",
             status: "completed",
             error: null,
@@ -291,6 +304,8 @@ describe("CodexACPAgent - loadSession", () => {
         });
         const activity = (id: string, kind: "started" | "interacted" | "completed") => ({
             type: "subAgentActivity" as const,
+            model: null,
+            reasoningEffort: null,
             id,
             kind,
             agentThreadId: "child-history",
@@ -383,6 +398,136 @@ describe("CodexACPAgent - loadSession", () => {
         ]);
     });
 
+    it("replays the model of a child only when its activity names it", async () => {
+        const fixture = createCodexMockTestFixture();
+        const agent = fixture.getCodexAcpAgent();
+        const client = fixture.getCodexAcpClient();
+        const appServer = fixture.getCodexAppServerClient();
+        client.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
+        client.getAccount = vi.fn().mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        client.listSkills = vi.fn().mockResolvedValue({data: []});
+        const model = createTestModel();
+        appServer.listModels = vi.fn().mockResolvedValue({data: [model], nextCursor: null});
+        const turn = (id: string, items: Thread["turns"][number]["items"]): Thread["turns"][number] => ({
+            id,
+            rootTurnId: null,
+            itemsView: "full",
+            status: "completed",
+            error: null,
+            startedAt: null,
+            completedAt: null,
+            durationMs: null,
+            items,
+        });
+        const makeThread = (id: string, turns: Thread["turns"]): Thread => ({
+            id,
+            sessionId: "root-history",
+            parentThreadId: id === "root-history" ? null : "root-history",
+            threadSource: null,
+            originator: null,
+            forkedFromId: null,
+            preview: id,
+            ephemeral: false,
+            modelProvider: "openai",
+            model: null,
+            reasoningEffort: null,
+            createdAt: 1,
+            updatedAt: 2,
+            recencyAt: null,
+            status: {type: "idle"},
+            path: null,
+            cwd: "/workspace",
+            cliVersion: "0",
+            section: null,
+            sectionEnteredAt: null,
+            projectId: null,
+            historyMode: "legacy",
+            source: "cli",
+            agentNickname: null,
+            agentRole: null,
+            gitInfo: null,
+            name: null,
+            turns,
+        });
+        const spawn = (childThreadId: string, requestedModel: string | null) => ({
+            type: "collabAgentToolCall" as const,
+            id: `spawn-${childThreadId}`,
+            tool: "spawnAgent" as const,
+            status: "completed" as const,
+            senderThreadId: "root-history",
+            receiverThreadIds: [childThreadId],
+            prompt: "Review the diff",
+            model: requestedModel,
+            reasoningEffort: null,
+            agentsStates: {},
+        });
+        const started = (
+            childThreadId: string,
+            resolvedModel: string | null,
+            kind: "started" | "interacted" | "completed" = "started",
+        ) => ({
+            type: "subAgentActivity" as const,
+            model: resolvedModel,
+            reasoningEffort: null,
+            id: `${kind}-${childThreadId}`,
+            kind,
+            agentThreadId: childThreadId,
+            agentPath: `/root/${childThreadId}`,
+        });
+        const root = makeThread("root-history", [
+            turn("root-turn-1", [
+                spawn("resolved", null),
+                started("resolved", model.id),
+                started("unknown", "custom-model"),
+                // A spawn request does not name the model: a role config can override it.
+                spawn("requested", model.id),
+                started("requested", null),
+                started("resolved", null, "completed"),
+            ]),
+            // Codex names the model only at the creation, so the follow-up generation reuses it.
+            turn("root-turn-2", [started("resolved", null, "interacted")]),
+        ]);
+        appServer.threadResume = vi.fn().mockResolvedValue({
+            thread: root,
+            model: model.id,
+            modelProvider: "openai",
+            cwd: "/workspace",
+            approvalPolicy: "never",
+            sandbox: {type: "dangerFullAccess"},
+            reasoningEffort: model.defaultReasoningEffort,
+        });
+        appServer.threadReadWithHistory = vi.fn().mockResolvedValue({thread: root});
+        appServer.threadRead = vi.fn().mockImplementation(({threadId}: {threadId: string}) =>
+            Promise.resolve({thread: makeThread(threadId, [turn(`${threadId}-turn-1`, []), turn(`${threadId}-turn-2`, [])])}));
+
+        await agent.initialize({
+            protocolVersion: 1,
+            clientCapabilities: {
+                _meta: {jetbrains: {air: {version: 1, capabilities: ["nativeSubagentSessions"]}}},
+            },
+        });
+        await agent.loadSession({sessionId: root.id, cwd: "/workspace", mcpServers: []});
+
+        const updates = fixture.getAcpConnectionEvents([])
+            .filter(event => event.method === "sessionUpdate")
+            .map(event => event.args[0])
+            .filter(({update}) => update.sessionUpdate === "subagent_spawned"
+                || (update.sessionUpdate === "config_option_update" && update.configOptions[0]?.category === "model"
+                    && update.configOptions.length === 1))
+            .map(({sessionId, update}) => update.sessionUpdate === "subagent_spawned"
+                ? `${sessionId} subagent_spawned ${update.subagentSessionId}`
+                : `${sessionId} model ${update.configOptions[0].currentValue} "${update.configOptions[0].options[0].name}"`);
+        expect(updates).toEqual([
+            "root-history subagent_spawned resolved",
+            `resolved model ${model.id} "${model.id}"`,
+            "root-history subagent_spawned unknown",
+            `unknown model custom-model "custom-model"`,
+            "root-history subagent_spawned requested",
+            "root-history subagent_spawned resolved:generation:2",
+            `resolved:generation:2 model ${model.id} "${model.id}"`,
+        ]);
+    });
+
     it("should replay history during loadSession", async () => {
         const fixture = createCodexMockTestFixture();
         const codexAcpAgent = fixture.getCodexAcpAgent();
@@ -456,6 +601,7 @@ describe("CodexACPAgent - loadSession", () => {
             turns: [
                 {
                     id: "turn-1",
+                    rootTurnId: null,
                     itemsView: "full",
                     status: "completed",
                     error: null,
@@ -560,6 +706,8 @@ describe("CodexACPAgent - loadSession", () => {
                         },
                         {
                             type: "subAgentActivity",
+                            model: null,
+                            reasoningEffort: null,
                             id: "item-subagent-1",
                             kind: "started",
                             agentThreadId: "thread-child-1",
@@ -573,7 +721,7 @@ describe("CodexACPAgent - loadSession", () => {
             ...thread,
             turns: thread.turns.map((turn) => ({
                 ...turn,
-                itemsView: "summary",
+                rootTurnId: null, itemsView: "summary",
                 items: turn.items.filter((item) => item.type === "userMessage" || item.type === "agentMessage"),
             })),
         };
@@ -906,7 +1054,7 @@ describe("CodexACPAgent - loadSession", () => {
                 turns: [
                     {
                         id: "turn-1",
-                        itemsView: "full",
+                        rootTurnId: null, itemsView: "full",
                         status: "completed",
                         error: null,
                         startedAt: null,

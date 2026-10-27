@@ -1,4 +1,4 @@
-import type {SessionId} from "@agentclientprotocol/sdk";
+import type {SessionId} from "@agentclientprotocol/sdk/unstable";
 import {
     LODY_EXTENSION_METHODS,
     type LodyGoalPromptControl,
