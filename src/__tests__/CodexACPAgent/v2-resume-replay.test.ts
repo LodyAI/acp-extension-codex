@@ -1,6 +1,6 @@
 import {afterEach, describe, expect, it, vi} from 'vitest';
-import * as acp from '@agentclientprotocol/sdk';
-import * as acpV2 from '@agentclientprotocol/sdk/experimental/v2';
+import * as acp from '@agentclientprotocol/sdk/unstable';
+import * as acpV2 from '@agentclientprotocol/sdk/experimental/v2/unstable';
 import {createAcpAgentRouter} from '../../AcpAgentRouter';
 import {CodexAcpServer} from '../../CodexAcpServer';
 import {CodexAcpClient} from '../../CodexAcpClient';
@@ -64,6 +64,7 @@ function createThread(overrides?: Partial<Thread>): Thread {
 const reviewReplayTurns: Thread["turns"] = [
     {
         id: T_ID,
+        rootTurnId: null,
         itemsView: "full",
         status: "interrupted",
         error: null,
@@ -82,6 +83,7 @@ const reviewReplayTurns: Thread["turns"] = [
     },
     {
         id: P_ID,
+        rootTurnId: null,
         itemsView: "full",
         status: "completed",
         error: null,
@@ -104,6 +106,7 @@ const reviewReplayTurns: Thread["turns"] = [
     },
     {
         id: T2_ID,
+        rootTurnId: null,
         itemsView: "full",
         status: "completed",
         error: null,
@@ -130,6 +133,7 @@ const reviewReplayTurns: Thread["turns"] = [
     },
     {
         id: P2_ID,
+        rootTurnId: null,
         itemsView: "full",
         status: "completed",
         error: null,

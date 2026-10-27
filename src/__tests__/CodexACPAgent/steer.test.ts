@@ -28,7 +28,7 @@ function historyThread(overrides: Partial<Thread> = {}): Thread {
         source: "appServer", threadSource: null, agentNickname: null, agentRole: null,
         gitInfo: null, name: null, originator: null,
         turns: [{
-            id: "turn-id", items: [steeredItem], itemsView: "full", status: "completed",
+            id: "turn-id", items: [steeredItem], rootTurnId: null, itemsView: "full", status: "completed",
             error: null, startedAt: null, completedAt: null, durationMs: null,
         }],
         ...overrides,
@@ -309,7 +309,7 @@ describe("CodexACPAgent - steer", () => {
             turn: {
                 id: "turn-id",
                 items: [],
-                itemsView: "notLoaded",
+                rootTurnId: null, itemsView: "notLoaded",
                 status: "completed",
                 error: null,
                 startedAt: null,
@@ -341,7 +341,7 @@ describe("CodexACPAgent - steer", () => {
             turn: {
                 id: "turn-id",
                 items: [],
-                itemsView: "notLoaded",
+                rootTurnId: null, itemsView: "notLoaded",
                 status: "completed",
                 error: null,
                 startedAt: null,

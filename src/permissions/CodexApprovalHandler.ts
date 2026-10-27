@@ -1,5 +1,5 @@
 import {additionalPermissionsToolCall, commandToolCall, fileChangeToolCall} from "./presentation";
-import * as acp from "@agentclientprotocol/sdk";
+import * as acp from "@agentclientprotocol/sdk/unstable";
 import type {ApprovalHandler} from "../CodexAppServerClient";
 import type {
     CommandExecutionRequestApprovalParams,
@@ -30,6 +30,7 @@ import {
 } from "./metadata";
 import type {PermissionPromptContext} from "./lifecycle";
 import {AcpToolCallRenderer} from "../tool-calls/AcpToolCallRenderer";
+import {subagentInteractionSignal, withSubagentUserAction} from "../subagents/SubagentInteraction";
 import {CommandReporter} from "../tool-calls/reporters/CommandReporter";
 import {FileChangeReporter} from "../tool-calls/reporters/FileChangeReporter";
 import {SandboxPermissionReporter} from "../tool-calls/reporters/SandboxPermissionReporter";
@@ -130,11 +131,12 @@ export class CodexApprovalHandler implements ApprovalHandler {
     }
 
     private requestPermission(request: acp.RequestPermissionRequest): Promise<acp.RequestPermissionResponse> {
-        return this.connection.request(
+        const signal = subagentInteractionSignal(request.sessionId, this.cancellationSignal);
+        return withSubagentUserAction(request.sessionId, () => this.connection.request(
             acp.methods.client.session.requestPermission,
             request,
-            this.cancellationSignal ? {cancellationSignal: this.cancellationSignal} : undefined,
-        );
+            signal ? {cancellationSignal: signal} : undefined,
+        ), request.toolCall.toolCallId);
     }
 
     private selectedDecision<T>(response: acp.RequestPermissionResponse, decisions: DecisionOption<T>[]): T | undefined {

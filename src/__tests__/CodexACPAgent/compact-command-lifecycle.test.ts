@@ -12,7 +12,7 @@ const sessionId = "compact-command-session";
 const turnId = "compact-command-turn";
 
 describe("compact command lifecycle", () => {
-    it.each(["interrupted", "failed"] as const)("captures an early %s turn before compact acknowledgement", async (status) => {
+    it.each(["completed", "interrupted", "failed"] as const)("captures an early %s turn before compact acknowledgement", async (status) => {
         const fixture = createCodexMockTestFixture();
         const appServer = fixture.getCodexAppServerClient();
         const completed = turnCompleted(status);
@@ -36,8 +36,7 @@ describe("compact command lifecycle", () => {
             settled = true;
             return result;
         });
-        // The preceding compact prompt may resolve on item/completed before this
-        // previous turn/completed reaches the next compact request.
+        // A preceding turn's terminal notification cannot finish this compaction.
         fixture.sendServerNotification({
             method: "turn/completed",
             params: {threadId: sessionId, turn: {...turn("completed"), id: "previous-turn"}},
@@ -67,11 +66,12 @@ describe("compact command lifecycle", () => {
             },
         };
         fixture.sendServerNotification(completed);
-        await Promise.resolve();
+        await new Promise(resolve => setImmediate(resolve));
         expect(settled).toBe(false);
-        const terminal = turnCompleted("completed");
-        fixture.sendServerNotification(terminal);
-        await expect(pending).resolves.toEqual(terminal.params);
+
+        const finished = turnCompleted("completed");
+        fixture.sendServerNotification(finished);
+        await expect(pending).resolves.toEqual(finished.params);
     });
 
     it("releases compact observation after the request is rejected", async () => {
@@ -86,11 +86,30 @@ describe("compact command lifecycle", () => {
 
         start.mockResolvedValue({});
         const retry = appServer.runCompact({threadId: sessionId});
-        const completed: ServerNotification = {method: "thread/compacted", params: {threadId: sessionId, turnId}};
+        fixture.sendServerNotification({method: "turn/started", params: {threadId: sessionId, turn: turn("inProgress")}});
+        const completed = turnCompleted("completed");
         fixture.sendServerNotification(completed);
         fixture.sendServerNotification({method: "turn/started", params: {threadId: sessionId, turn: turn("inProgress")}});
         fixture.sendServerNotification(turnCompleted("completed"));
         await expect(retry).resolves.toEqual(turnCompleted("completed").params);
+    });
+
+    it.each(["failed", "interrupted"] as const)("preserves a %s turn after the compaction item completes", async status => {
+        const fixture = createCodexMockTestFixture();
+        const appServer = fixture.getCodexAppServerClient();
+        vi.spyOn(appServer, "threadCompactStart").mockResolvedValue({});
+        const pending = appServer.runCompact({threadId: sessionId});
+        startCompaction(fixture);
+        fixture.sendServerNotification({
+            method: "item/completed",
+            params: {
+                threadId: sessionId, turnId, completedAtMs: 1,
+                item: {type: "contextCompaction", id: "compaction-item"},
+            },
+        });
+        const completed = turnCompleted(status);
+        fixture.sendServerNotification(completed);
+        await expect(pending).resolves.toEqual(completed.params);
     });
 
     it("rejects a compact wait when the Codex connection closes", async () => {
@@ -210,7 +229,7 @@ function turnCompleted(status: "completed" | "failed" | "interrupted"): Extract<
 
 function turn(status: Turn["status"]): Turn {
     return {
-        id: turnId, items: [], itemsView: "full", status,
+        id: turnId, rootTurnId: null, items: [], itemsView: "full", status,
         error: status === "failed" ? {
             message: "Compaction service failed.", codexErrorInfo: "serverOverloaded", additionalDetails: null, misalignment: null,
         } : null,

@@ -1,5 +1,5 @@
 import {airOnlyMeta, AIR_MESSAGE_PHASE_KEY} from "./AirExtension";
-import type {ContentBlock} from "@agentclientprotocol/sdk";
+import type {ContentBlock} from "@agentclientprotocol/sdk/unstable";
 import type {UpdateSessionEvent} from "./ACPSessionConnection";
 
 type AcpMeta = Record<string, unknown>;

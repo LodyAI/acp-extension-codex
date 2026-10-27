@@ -28,11 +28,8 @@
   },
   {
     "promptError": {
-      "code": -32603,
-      "message": "Internal error",
-      "data": {
-        "details": "thread not found: thread-1"
-      }
+      "code": -32600,
+      "message": "thread not found: thread-1"
     }
   }
 ]

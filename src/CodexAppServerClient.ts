@@ -189,6 +189,8 @@ export class CodexAppServerClient {
     private readonly threadSettings = new Map<string, ThreadSettings>();
     private readonly tokenUsage = new Map<string, import("./app-server/v2").ThreadTokenUsageUpdatedNotification>();
     private readonly staleTurnIds = new Map<string, Set<string>>();
+    private readonly runningTurnIds = new Map<string, string>();
+    /** Ends the notification waits below when the connection is gone, see {@link waitWhileConnected}. */
     readonly connectionLoss: ConnectionLoss;
     private turnCompletionTerminalError: Error | null = null;
     private codexHome: string | null = null;
@@ -218,6 +220,9 @@ export class CodexAppServerClient {
                 this.mcpOauthCompletions.complete(serverNotification.params);
             }
             if (isTurnCompletedNotification(serverNotification)) {
+                if (serverNotification.params.turn.status !== "inProgress" && this.runningTurnIds.get(serverNotification.params.threadId) === serverNotification.params.turn.id) {
+                    this.runningTurnIds.delete(serverNotification.params.threadId);
+                }
                 const compact = this.pendingCompactTurns.get(serverNotification.params.threadId);
                 if (compact?.turnId === serverNotification.params.turn.id) {
                     compact.resolve(serverNotification.params);
@@ -230,6 +235,7 @@ export class CodexAppServerClient {
                     compact.turnId = serverNotification.params.turn.id;
                     compact.onTurnStarted?.(compact.turnId);
                 }
+                this.runningTurnIds.set(serverNotification.params.threadId, serverNotification.params.turn.id);
                 this.recordTurnStarted(serverNotification.params.threadId, serverNotification.params.turn.id);
             }
             if (isThreadStatusChangedNotification(serverNotification)) {
@@ -975,6 +981,7 @@ export class CodexAppServerClient {
             threadId,
             turn: {
                 id: turnId,
+                rootTurnId: null,
                 items: [],
                 itemsView: "notLoaded",
                 status: "interrupted",
@@ -1009,6 +1016,10 @@ export class CodexAppServerClient {
     private codexEventHandlers: Array<(event: CodexConnectionEvent) => void> = [];
     onClientTransportEvent(callback: (event: CodexConnectionEvent) => void){
         this.codexEventHandlers.push(callback);
+        return () => {
+            const index = this.codexEventHandlers.indexOf(callback);
+            if (index !== -1) this.codexEventHandlers.splice(index, 1);
+        };
     }
 
     private notificationHandlers = new Map<string, (event: ServerNotification) => void>();
@@ -1025,6 +1036,8 @@ export class CodexAppServerClient {
             notificationHandler(notification);
         }
     }
+
+    runningTurnId(threadId: string): string | undefined { return this.runningTurnIds.get(threadId); }
 
     private recordTurnCompleted(event: TurnCompletedNotification): void {
         const threadResolvers = this.pendingTurnCompletionResolvers.get(event.threadId);

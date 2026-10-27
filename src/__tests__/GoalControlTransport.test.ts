@@ -1,4 +1,4 @@
-import * as acp from "@agentclientprotocol/sdk";
+import * as acp from "@agentclientprotocol/sdk/unstable";
 import {describe, expect, it} from "vitest";
 import {GOAL_CONTROL_METHOD} from "../AcpExtensions";
 import type {CodexAcpServer} from "../CodexAcpServer";

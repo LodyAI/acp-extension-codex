@@ -33,6 +33,12 @@
         "codexResponse": "turn/start"
       },
       {
+        "sessionUpdate": {
+          "state": "running",
+          "sessionUpdate": "state_update"
+        }
+      },
+      {
         "codexNotification": "turn/started"
       },
       {
@@ -55,12 +61,6 @@
       },
       {
         "sessionUpdate": {
-          "state": "running",
-          "sessionUpdate": "state_update"
-        }
-      },
-      {
-        "sessionUpdate": {
           "_meta": {
             "codex": {
               "error": {
@@ -74,7 +74,11 @@
       },
       {
         "sessionUpdate": {
-          "stopReason": "end_turn",
+          "error": {
+            "code": 1001,
+            "message": "Connection to Codex was lost."
+          },
+          "stopReason": "error",
           "_meta": {
             "quota": {
               "token_count": null,
@@ -121,6 +125,12 @@
         "codexResponse": "turn/start"
       },
       {
+        "sessionUpdate": {
+          "state": "running",
+          "sessionUpdate": "state_update"
+        }
+      },
+      {
         "codexNotification": "turn/started"
       },
       {
@@ -143,13 +153,11 @@
       },
       {
         "sessionUpdate": {
-          "state": "running",
-          "sessionUpdate": "state_update"
-        }
-      },
-      {
-        "sessionUpdate": {
-          "stopReason": "end_turn",
+          "error": {
+            "code": 1001,
+            "message": "Connection to Codex was lost."
+          },
+          "stopReason": "error",
           "_meta": {
             "quota": {
               "token_count": null,

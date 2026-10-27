@@ -19,6 +19,12 @@
   },
   {
     "sessionUpdate": {
+      "state": "running",
+      "sessionUpdate": "state_update"
+    }
+  },
+  {
+    "sessionUpdate": {
       "_meta": {
         "codex": {
           "error": {
@@ -36,12 +42,6 @@
   },
   {
     "sessionUpdate": {
-      "state": "running",
-      "sessionUpdate": "state_update"
-    }
-  },
-  {
-    "sessionUpdate": {
       "_meta": {
         "codex": {
           "error": {
@@ -55,7 +55,11 @@
   },
   {
     "sessionUpdate": {
-      "stopReason": "end_turn",
+      "error": {
+        "code": -32603,
+        "message": "Codex encountered an internal error."
+      },
+      "stopReason": "error",
       "_meta": {
         "quota": {
           "token_count": null,

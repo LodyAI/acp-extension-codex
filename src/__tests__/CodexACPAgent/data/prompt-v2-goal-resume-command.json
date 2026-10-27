@@ -28,6 +28,12 @@
   },
   {
     "sessionUpdate": {
+      "state": "running",
+      "sessionUpdate": "state_update"
+    }
+  },
+  {
+    "sessionUpdate": {
       "_meta": {
         "lody": {
           "goal": {
@@ -60,12 +66,6 @@
         }
       },
       "sessionUpdate": "session_info_update"
-    }
-  },
-  {
-    "sessionUpdate": {
-      "state": "running",
-      "sessionUpdate": "state_update"
     }
   },
   {

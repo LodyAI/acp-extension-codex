@@ -132,7 +132,7 @@ describe('Token Usage Events', () => {
             const codexAcpAgent = mockFixture.getCodexAcpAgent();
 
             mockFixture.getCodexAppServerClient().turnStart = vi.fn().mockResolvedValue({
-                turn: { id: "turn-id", items: [], status: "inProgress", error: null }
+                turn: { id: "turn-id", items: [], rootTurnId: null, itemsView: "notLoaded", startedAt: null, completedAt: null, durationMs: null, status: "inProgress", error: null }
             });
 
             // awaitTurnCompleted sends notifications before resolving
@@ -275,7 +275,7 @@ describe('Token Usage Events', () => {
             const codexAcpAgent = mockFixture.getCodexAcpAgent();
             let turn = 0;
             mockFixture.getCodexAppServerClient().turnStart = vi.fn().mockImplementation(async () => ({
-                turn: { id: `turn-${turn + 1}`, items: [], status: "inProgress", error: null },
+                turn: { id: `turn-${turn + 1}`, items: [], rootTurnId: null, itemsView: "notLoaded", startedAt: null, completedAt: null, durationMs: null, status: "inProgress", error: null },
             }));
             mockFixture.getCodexAppServerClient().awaitTurnCompleted = vi.fn().mockImplementation(async () => {
                 const notifications = turns[turn++] ?? [];
@@ -635,7 +635,7 @@ describe('Token Usage Events', () => {
             const codexAcpAgent = mockFixture.getCodexAcpAgent();
 
             mockFixture.getCodexAppServerClient().turnStart = vi.fn().mockResolvedValue({
-                turn: { id: "turn-id", items: [], status: "inProgress", error: null }
+                turn: { id: "turn-id", items: [], rootTurnId: null, itemsView: "notLoaded", startedAt: null, completedAt: null, durationMs: null, status: "inProgress", error: null }
             });
 
             mockFixture.getCodexAppServerClient().awaitTurnCompleted = vi.fn().mockImplementation(async () => {
@@ -841,6 +841,8 @@ describe('Token Usage Events', () => {
                 startedAtMs: 0,
                 item: {
                     type: 'subAgentActivity',
+                    model: null,
+                    reasoningEffort: null,
                     id: 'activity-started',
                     kind: 'started',
                     agentThreadId: childThreadId,
@@ -856,6 +858,7 @@ describe('Token Usage Events', () => {
                 turn: {
                     id: 'child-turn-id',
                     items: [],
+                    rootTurnId: null,
                     itemsView: 'notLoaded',
                     status: 'completed',
                     error: null,
@@ -880,6 +883,7 @@ describe('Token Usage Events', () => {
                 true,
                 new ACPSessionConnection(mockFixture.getAcpConnection(), sessionId),
                 () => {},
+                () => ({currentModel: null, availableModels: []}),
             );
             mockFixture.getCodexAppServerClient().turnStart = vi.fn().mockResolvedValue({
                 turn: { id: 'turn-id', items: [], status: 'inProgress', error: null },

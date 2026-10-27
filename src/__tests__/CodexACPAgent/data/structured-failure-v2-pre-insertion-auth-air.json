@@ -1,0 +1,30 @@
+{
+  "error": {
+    "code": -32000,
+    "message": "Authentication required"
+  },
+  "stopReason": "error",
+  "_meta": {
+    "quota": {
+      "token_count": null,
+      "model_usage": []
+    },
+    "jetbrains": {
+      "air": {
+        "version": 1,
+        "sessionFailure": {
+          "id": "turn-1:error",
+          "revision": 1,
+          "category": "access",
+          "severity": "error",
+          "title": "private token-refresh diagnostic",
+          "actions": [
+            "login"
+          ]
+        }
+      }
+    }
+  },
+  "state": "idle",
+  "sessionUpdate": "state_update"
+}

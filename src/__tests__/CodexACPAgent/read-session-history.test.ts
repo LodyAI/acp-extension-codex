@@ -128,7 +128,7 @@ function createHistoryThread(): Thread {
         name: "Imported conversation",
         turns: [{
             id: "turn-1",
-            itemsView: "full",
+            rootTurnId: null, itemsView: "full",
             status: "completed",
             error: null,
             startedAt: null,

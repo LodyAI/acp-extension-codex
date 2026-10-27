@@ -1,4 +1,4 @@
-import * as acp from "@agentclientprotocol/sdk";
+import * as acp from "@agentclientprotocol/sdk/unstable";
 import {randomUUID} from "node:crypto";
 import {LODY_SUBAGENT_EVENT_METHOD, isLodySubagentOutput, type LodySubagentEvent, type LodySubagentSnapshot} from "acp-extension-core";
 import type {AcpClientConnection, UpdateSessionEvent} from "../ACPSessionConnection";

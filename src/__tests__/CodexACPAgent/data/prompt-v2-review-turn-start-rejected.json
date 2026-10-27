@@ -1,11 +1,8 @@
 [
   {
     "promptError": {
-      "code": -32603,
-      "message": "Internal error",
-      "data": {
-        "details": "Cannot review right now"
-      }
+      "code": -32600,
+      "message": "Cannot review right now"
     }
   }
 ]
