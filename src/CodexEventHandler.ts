@@ -851,6 +851,18 @@ export class CodexEventHandler {
     }
 
     private async emitExtNotification(notification: ServerNotification): Promise<void> {
+        // TEMP prompt-suggestion-debug: stderr is captured by Lody; never log prediction text.
+        if (notification.method === "thread/prediction/updated") {
+            console.error("[prompt-suggestion-debug] native-received", JSON.stringify({
+                sessionId: this.sessionState.sessionId,
+                threadId: notification.params.threadId,
+                sourceTurnId: notification.params.sourceTurnId,
+                negotiated: this.sessionState.clientCapabilities.promptSuggestions,
+                sessionMatches: notification.params.threadId === this.sessionState.sessionId,
+                result: notification.params.result.type,
+                textLength: notification.params.result.type === "completed" ? notification.params.result.text?.length ?? 0 : 0,
+            }));
+        }
         if (notification.method === "thread/prediction/updated"
             && notification.params.threadId === this.sessionState.sessionId
             && this.sessionState.clientCapabilities.promptSuggestions) {
@@ -860,6 +872,8 @@ export class CodexEventHandler {
                 result: notification.params.result,
             };
             await this.notifyExt(LODY_EXTENSION_METHODS.sessionPromptSuggestion, update);
+            // TEMP prompt-suggestion-debug
+            console.error("[prompt-suggestion-debug] adapter-forwarded", JSON.stringify({ sessionId: update.sessionId }));
         }
         if (notification.method === "thread/tokenUsage/updated"
             && notification.params.threadId === this.sessionState.sessionId) {
