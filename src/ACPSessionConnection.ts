@@ -1,5 +1,5 @@
 import * as acp from "@agentclientprotocol/sdk/unstable";
-import * as acpV2 from "@agentclientprotocol/sdk/experimental/v2/unstable";
+import type * as acpV2 from "@agentclientprotocol/sdk/experimental/v2/unstable";
 import {
     type AcpSessionNotification,
     type AcpSessionUpdate,
@@ -22,7 +22,7 @@ export class AcpV2Connection {
     private isTurnRunning: (sessionId: string) => boolean = () => true;
     private readonly foreground = new Map<string, AcpV2ForegroundState>();
 
-    constructor(client: AcpV2ClientConnection) {
+    constructor(client: AcpV2ClientConnection, readonly methods: typeof acpV2.methods.client) {
         this.client = client;
     }
 
@@ -49,7 +49,7 @@ export class AcpV2Connection {
      */
     async updateSession(sessionId: string, update: AcpSessionUpdate): Promise<void> {
         for (const v2Update of toV2SessionUpdates(update)) {
-            await this.client.notify(acpV2.methods.client.session.update, {sessionId, update: v2Update});
+            await this.client.notify(this.methods.session.update, {sessionId, update: v2Update});
         }
     }
 
@@ -87,7 +87,7 @@ export class AcpV2Connection {
         let foreground = this.foreground.get(sessionId);
         if (!foreground) {
             foreground = new AcpV2ForegroundState(
-                state => this.client.notify(acpV2.methods.client.session.update, {
+                state => this.client.notify(this.methods.session.update, {
                     sessionId,
                     update: {sessionUpdate: "state_update", ...state},
                 }),
@@ -117,7 +117,7 @@ export class AcpV2Connection {
                 update = {sessionUpdate: "agent_thought", messageId, content: []};
                 break;
         }
-        await this.client.notify(acpV2.methods.client.session.update, {
+        await this.client.notify(this.methods.session.update, {
             sessionId,
             update,
         });
@@ -130,7 +130,7 @@ export class AcpV2Connection {
     ): Promise<acp.RequestPermissionResponse> {
         return this.withUserAction(request.sessionId, request.toolCall.toolCallId, async () => {
             const response = await this.client.request(
-                acpV2.methods.client.session.requestPermission,
+                this.methods.session.requestPermission,
                 toV2RequestPermissionRequest(request),
                 options,
             );
@@ -145,7 +145,7 @@ export class AcpV2Connection {
     ): Promise<acp.CreateElicitationResponse> {
         const sendRequest = async () => {
             const response = await this.client.request(
-                acpV2.methods.client.elicitation.create,
+                this.methods.elicitation.create,
                 toV2CreateElicitationRequest(request),
                 options,
             );
@@ -161,7 +161,7 @@ export class AcpV2Connection {
 
     /** Sends `elicitation/complete`, wire-identical between versions. */
     async completeElicitation(notification: acp.CompleteElicitationNotification): Promise<void> {
-        await this.client.notify(acpV2.methods.client.elicitation.complete, notification);
+        await this.client.notify(this.methods.elicitation.complete, notification);
     }
 
     /**
@@ -250,7 +250,7 @@ export class ACPSessionConnection {
 
     async updateSubagentState(childSessionId: string, parentSessionId: string, state: acpV2.StateUpdate): Promise<void> {
         if (this.v2Connection) {
-            await this.v2Connection.client.notify(acpV2.methods.client.session.update, {
+            await this.v2Connection.client.notify(this.v2Connection.methods.session.update, {
                 sessionId: childSessionId, update: {sessionUpdate: "state_update", ...state},
             });
         }

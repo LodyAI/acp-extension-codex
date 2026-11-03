@@ -1,7 +1,8 @@
 import {expect, vi} from 'vitest';
 import * as acp from '@agentclientprotocol/sdk/unstable';
 import * as acpV2 from '@agentclientprotocol/sdk/experimental/v2/unstable';
-import {createAcpAgentRouter} from '../../AcpAgentRouter';
+import {createAcpAgentRouter} from '../../AcpAgentRouterFull';
+import {createAcpAgentRouterCore} from '../../AcpAgentRouter';
 import {CodexAcpServer} from '../../CodexAcpServer';
 import {CodexAcpClient} from '../../CodexAcpClient';
 import {CodexAppServerClient} from '../../CodexAppServerClient';
@@ -195,10 +196,11 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
     vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
     vi.spyOn(codexAcpClient, "awaitMcpServerStartup").mockResolvedValue(options.mcpStartup ?? {ready: [], failed: [], cancelled: []});
     let agent: CodexAcpServer | null = null;
-    const router = createAcpAgentRouter((connection) => {
+    const createAgent: Parameters<typeof createAcpAgentRouterCore>[0] = (connection) => {
         agent = new CodexAcpServer(connection, codexAcpClient, undefined, options.exitCode);
         return agent;
-    });
+    };
+    const router = protocolVersion === 1 ? createAcpAgentRouterCore(createAgent) : createAcpAgentRouter(createAgent);
     const clientToAgent = new TransformStream<Uint8Array, Uint8Array>();
     const agentToClient = new TransformStream<Uint8Array, Uint8Array>();
     router.connect(acp.ndJsonStream(agentToClient.writable, clientToAgent.readable));

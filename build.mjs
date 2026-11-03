@@ -1,11 +1,11 @@
 import { build } from 'esbuild';
 
 await build({
-  entryPoints: ['src/index.ts'],
+  entryPoints: { index: 'src/index.ts', lody: 'src/lody.ts' },
   bundle: true,
   platform: 'node',
   format: 'esm',
-  outfile: 'dist/index.js',
+  outdir: 'dist',
   external: ['@openai/codex'],
   // Polyfill `require` for CJS modules bundled into ESM output
   banner: {

@@ -1,3 +1,4 @@
+import * as acpV2 from '@agentclientprotocol/sdk/experimental/v2/unstable';
 import {describe, expect, it} from 'vitest';
 import {AcpV2Connection, type AcpClientConnection, type AcpV2ClientConnection} from '../../ACPSessionConnection';
 import {CodexEventHandler} from '../../CodexEventHandler';
@@ -11,7 +12,7 @@ for (const version of [1, 2] as const) {
       const received: {method: string; params: unknown}[] = [];
       const wire = {notify: async (method: string, params: unknown) => { received.push({method, params}); }, request: async () => { throw new Error('unexpected request'); }};
       const connection = version === 2
-        ? new AcpV2Connection(wire as AcpV2ClientConnection).extensionOnlyV1View()
+        ? new AcpV2Connection(wire as AcpV2ClientConnection, acpV2.methods.client).extensionOnlyV1View()
         : wire as AcpClientConnection;
       const caps = {_meta: {lody: {promptSuggestions: {version: negotiatedVersion}}}};
       const state = createTestSessionState({sessionId: 'root', currentTurnId: null,

@@ -1,5 +1,5 @@
 import * as acp from "@agentclientprotocol/sdk/unstable";
-import * as acpV2 from "@agentclientprotocol/sdk/experimental/v2/unstable";
+import type * as acpV2 from "@agentclientprotocol/sdk/experimental/v2/unstable";
 import {z} from "zod";
 import type {CodexAcpServer} from "./CodexAcpServer";
 import {type AcpClientConnection, AcpV2Connection} from "./ACPSessionConnection";
@@ -73,17 +73,16 @@ const hooksTrustParamsParser = z.object({
     hooks: z.array(z.object({key: z.string().min(1), currentHash: z.string().min(1)})).min(1),
 });
 
-/**
- * Builds the ACP router. It picks the v1 or v2 handler chain from the first `initialize`
- * request, and only the selected chain's `onConnect` runs for the connection.
- */
-export function createAcpAgentRouter(
+type AcpV2Sdk = typeof import("@agentclientprotocol/sdk/experimental/v2/unstable");
+
+export function createAcpAgentRouterCore(
     createAgent: (connection: AcpClientConnection | AcpV2Connection) => CodexAcpServer,
+    v2?: AcpV2Sdk,
 ): Pick<acpV2.AgentProtocolRouter, "connect"> {
     return {
         connect(stream, options) {
             const responses = new AcpResponseDelivery();
-            const connection = createRouter(createAgent, responses).connect(responses.observe(stream), options);
+            const connection = createRouter(createAgent, responses, v2).connect(responses.observe(stream), options);
             void connection.closed.then(() => responses.dispose());
             return connection;
         },
@@ -93,7 +92,8 @@ export function createAcpAgentRouter(
 function createRouter(
     createAgent: (connection: AcpClientConnection | AcpV2Connection) => CodexAcpServer,
     responses: AcpResponseDelivery,
-): acpV2.AgentProtocolRouter {
+    v2?: AcpV2Sdk,
+): Pick<acpV2.AgentProtocolRouter, "connect"> {
     let codexAcpServer: CodexAcpServer | null = null;
     const getAgent = (params?: {sessionId?: unknown}): CodexAcpServer => {
         if (!codexAcpServer) {
@@ -194,26 +194,28 @@ function createRouter(
         .onRequest(SESSION_LIST_SUBSCRIBE_METHOD, sessionListSubscriptionParamsParser, (ctx) => getAgent().sessionIndex.subscribeList(ctx.params))
         .onRequest(SESSION_LIST_UNSUBSCRIBE_METHOD, sessionListSubscriptionParamsParser, (ctx) => getAgent().sessionIndex.unsubscribeList(ctx.params));
 
-    const v2Agent = acpV2.agent({name: packageJson.name})
-        .onConnect((connection) => attachAgent(createAgent(new AcpV2Connection(connection.client)), connection.signal))
-        .onRequest(acpV2.methods.agent.initialize, (ctx) => getAgent().initializeV2(ctx.params))
+    if (!v2) return v1Agent;
+
+    const v2Agent = v2.agent({name: packageJson.name})
+        .onConnect((connection) => attachAgent(createAgent(new AcpV2Connection(connection.client, v2.methods.client)), connection.signal))
+        .onRequest(v2.methods.agent.initialize, (ctx) => getAgent().initializeV2(ctx.params))
         // No `session/load`: v2 folds it into `session/resume` with `replayFrom`.
-        .onRequest(acpV2.methods.agent.session.new, (ctx) => getAgent().newSessionV2(ctx.params))
-        .onRequest(acpV2.methods.agent.session.list, (ctx) => getAgent().listSessions(ctx.params))
-        .onRequest(acpV2.methods.agent.session.delete, (ctx) => getAgent(ctx.params).deleteSession(ctx.params))
-        .onRequest(acpV2.methods.agent.session.resume, (ctx) => setup(ctx.params.sessionId, ctx.requestId, () => getAgent(ctx.params).resumeSessionV2(ctx.params), ctx.signal))
-        .onRequest(acpV2.methods.agent.session.fork, (ctx) => getAgent(ctx.params).forkSessionV2(ctx.params))
-        .onRequest(acpV2.methods.agent.session.close, (ctx) => getAgent(ctx.params).closeSession(ctx.params))
+        .onRequest(v2.methods.agent.session.new, (ctx) => getAgent().newSessionV2(ctx.params))
+        .onRequest(v2.methods.agent.session.list, (ctx) => getAgent().listSessions(ctx.params))
+        .onRequest(v2.methods.agent.session.delete, (ctx) => getAgent(ctx.params).deleteSession(ctx.params))
+        .onRequest(v2.methods.agent.session.resume, (ctx) => setup(ctx.params.sessionId, ctx.requestId, () => getAgent(ctx.params).resumeSessionV2(ctx.params), ctx.signal))
+        .onRequest(v2.methods.agent.session.fork, (ctx) => getAgent(ctx.params).forkSessionV2(ctx.params))
+        .onRequest(v2.methods.agent.session.close, (ctx) => getAgent(ctx.params).closeSession(ctx.params))
         // No `session/set_mode`: v2 removed the modes API; modes are config options.
-        .onRequest(acpV2.methods.agent.session.setConfigOption, (ctx) => getAgent(ctx.params).setSessionConfigOptionV2(ctx.params))
+        .onRequest(v2.methods.agent.session.setConfigOption, (ctx) => getAgent(ctx.params).setSessionConfigOptionV2(ctx.params))
         // The v1-only `authentication/status|logout` extensions are not registered on v2.
-        .onRequest(acpV2.methods.agent.auth.login, (ctx) => getAgent().authenticateV2(ctx.params, ctx.requestId))
-        .onRequest(acpV2.methods.agent.auth.logout, (ctx) => getAgent().logoutV2(ctx.params))
-        .onRequest(acpV2.methods.agent.session.prompt, (ctx) => getAgent(ctx.params).promptV2(ctx.params, ctx.signal))
-        .onNotification(acpV2.methods.agent.session.cancel, (ctx) => getAgent().cancel(ctx.params))
-        .onRequest(acpV2.methods.agent.providers.list, (ctx) => getAgent().listProviders(ctx.params))
-        .onRequest(acpV2.methods.agent.providers.set, (ctx) => getAgent().setProvider(ctx.params))
-        .onRequest(acpV2.methods.agent.providers.disable, (ctx) => getAgent().disableProvider(ctx.params))
+        .onRequest(v2.methods.agent.auth.login, (ctx) => getAgent().authenticateV2(ctx.params, ctx.requestId))
+        .onRequest(v2.methods.agent.auth.logout, (ctx) => getAgent().logoutV2(ctx.params))
+        .onRequest(v2.methods.agent.session.prompt, (ctx) => getAgent(ctx.params).promptV2(ctx.params, ctx.signal))
+        .onNotification(v2.methods.agent.session.cancel, (ctx) => getAgent().cancel(ctx.params))
+        .onRequest(v2.methods.agent.providers.list, (ctx) => getAgent().listProviders(ctx.params))
+        .onRequest(v2.methods.agent.providers.set, (ctx) => getAgent().setProvider(ctx.params))
+        .onRequest(v2.methods.agent.providers.disable, (ctx) => getAgent().disableProvider(ctx.params))
         .onRequest(LODY_READ_SESSION_HISTORY_METHOD, lodyReadSessionHistoryParamsParser, (ctx) => getAgent().readSessionHistory(ctx.params))
         .onRequest(LODY_RATE_LIMITS_GET_METHOD, lodyRateLimitsGetParamsParser, () => getAgent().readRateLimits())
         .onRequest(SESSION_STEERING_METHOD, sessionSteerParamsParser, (ctx) => getAgent(ctx.params).extMethod(SESSION_STEERING_METHOD, ctx.params))
@@ -226,5 +228,5 @@ function createRouter(
         .onRequest(SESSION_LIST_SUBSCRIBE_METHOD, sessionListSubscriptionParamsParser, (ctx) => getAgent().sessionIndex.subscribeList(ctx.params))
         .onRequest(SESSION_LIST_UNSUBSCRIBE_METHOD, sessionListSubscriptionParamsParser, (ctx) => getAgent().sessionIndex.unsubscribeList(ctx.params));
 
-    return acpV2.agentProtocolRouter().withV1(v1Agent).withV2(v2Agent);
+    return v2.agentProtocolRouter().withV1(v1Agent).withV2(v2Agent);
 }
