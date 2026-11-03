@@ -3,11 +3,12 @@ import * as acpV2 from "@agentclientprotocol/sdk/experimental/v2";
 import {describe, expect, it} from "vitest";
 import {CODEX_LODY_CAPABILITIES, LODY_RATE_LIMITS_GET_METHOD, LODY_READ_SESSION_HISTORY_METHOD} from "../AcpExtensions";
 import type {CodexAcpServer} from "../CodexAcpServer";
-import {createAcpAgentRouter} from "../AcpAgentRouter";
-import {ACPSessionConnection, AcpV2Connection} from "../ACPSessionConnection";
+import {createAcpAgentRouter} from "../AcpAgentRouterFull";
+import {createAcpAgentRouterCore} from "../AcpAgentRouter";
+import {ACPSessionConnection, AcpV2Connection, type AcpClientConnection} from "../ACPSessionConnection";
 
-async function connectRouter(version: 1 | 2) {
-    const router = createAcpAgentRouter(connection => ({
+async function connectRouter(version: 1 | 2, v1Only: boolean) {
+    const createAgent = (connection: AcpClientConnection | AcpV2Connection) => ({
         async initialize() {
             return {protocolVersion: 1, agentCapabilities: {_meta: {lody: CODEX_LODY_CAPABILITIES}}, authMethods: []};
         },
@@ -24,7 +25,8 @@ async function connectRouter(version: 1 | 2) {
             return {accounts: [{accountId: "synthetic", windows: []}]};
         },
         sessionIndex: {dispose() {}},
-    }) as unknown as CodexAcpServer);
+    }) as unknown as CodexAcpServer;
+    const router = v1Only ? createAcpAgentRouterCore(createAgent) : createAcpAgentRouter(createAgent);
     const clientToAgent = new TransformStream<Uint8Array, Uint8Array>();
     const agentToClient = new TransformStream<Uint8Array, Uint8Array>();
     router.connect(acp.ndJsonStream(agentToClient.writable, clientToAgent.readable));
@@ -46,9 +48,13 @@ async function connectRouter(version: 1 | 2) {
     return {close: () => client.close(), request: (method: string, params: unknown) => client.agent.request(method, params), updates, capabilities: initialized.capabilities};
 }
 
-describe.each([1, 2] as const)("Core history transport over production ACP v%s", version => {
+describe.each([
+    {name: "v1", version: 1, v1Only: false},
+    {name: "v1-only", version: 1, v1Only: true},
+    {name: "v2", version: 2, v1Only: false},
+] as const)("Core history transport over production ACP $name", ({version, v1Only}) => {
     it("delivers history before the response and serves the advertised rate-limit query", async () => {
-        const {close, request, updates, capabilities} = await connectRouter(version);
+        const {close, request, updates, capabilities} = await connectRouter(version, v1Only);
         try {
             expect(capabilities?._meta).toMatchObject({lody: {
                 sessionHistory: {version: 1}, rateLimits: {version: 1, query: true},
@@ -65,7 +71,7 @@ describe.each([1, 2] as const)("Core history transport over production ACP v%s",
     });
 
     it("rejects invalid parameters and preserves history errors without replay", async () => {
-        const {close, request, updates} = await connectRouter(version);
+        const {close, request, updates} = await connectRouter(version, v1Only);
         try {
             for (const params of [{}, {sessionId: ""}, {sessionId: 42}]) {
                 await expect(request(LODY_READ_SESSION_HISTORY_METHOD, params)).rejects.toMatchObject({code: -32602});

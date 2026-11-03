@@ -1,6 +1,9 @@
 This package uses the bundled `@openai/codex` dependency by default.
 Set `CODEX_PATH` to run a different Codex binary; versions other than the one specified in `package.json` may not be compatible.
 
+`npm run build` emits the standard `dist/index.js` and the ACP v1 entry
+`dist/lody.js`, which Lody bundles into its CLI.
+
 ### Lody subagent event transport
 
 The event contract is supplied by the published Core 0.1.9 dependency.

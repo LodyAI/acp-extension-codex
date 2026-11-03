@@ -2,7 +2,8 @@ import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import * as acp from '@agentclientprotocol/sdk/unstable';
 import * as acpV2 from '@agentclientprotocol/sdk/experimental/v2/unstable';
 import {z} from 'zod';
-import {createAcpAgentRouter} from '../../AcpAgentRouter';
+import {createAcpAgentRouter} from '../../AcpAgentRouterFull';
+import {createAcpAgentRouterCore} from '../../AcpAgentRouter';
 import {toV1ClientCapabilitiesView} from '../../AcpV2ClientCapabilities';
 import {AIR_NATIVE_SUBAGENT_SESSIONS_KEY, clientSupportsAirCapability} from '../../AirExtension';
 import {AcpV2Connection} from '../../ACPSessionConnection';
@@ -31,14 +32,15 @@ const v2ClientCapabilities: acpV2.ClientCapabilities = {
     },
 };
 
-function connectRouter() {
+function connectRouter(v1Only = false) {
     const mocks = createMockConnections();
-    const router = createAcpAgentRouter((connection) => {
+    const createAgent: Parameters<typeof createAcpAgentRouterCore>[0] = (connection) => {
         const codexAcpClient = new CodexAcpClient(new CodexAppServerClient(mocks.mockCodexConnection as any));
         vi.spyOn(codexAcpClient, "getAgentConfiguredModelProvider").mockResolvedValue("openai");
         vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: true});
         return new CodexAcpServer(connection, codexAcpClient);
-    });
+    };
+    const router = v1Only ? createAcpAgentRouterCore(createAgent) : createAcpAgentRouter(createAgent);
     const clientToAgent = new TransformStream<Uint8Array, Uint8Array>();
     const agentToClient = new TransformStream<Uint8Array, Uint8Array>();
     router.connect(acp.ndJsonStream(agentToClient.writable, clientToAgent.readable));
@@ -122,6 +124,22 @@ describe('CodexACPAgent - initialize over ACP v2', () => {
             'data/initialize-v1-routed-response.json'
         );
     });
+
+    it('returns the same v1 initialize response through the Lody router', async () => {
+        const initialize = async (v1Only: boolean) => {
+            const {clientStream} = connectRouter(v1Only);
+            const connection = acp.client({name: "test-client"}).connect(clientStream);
+            try {
+                return await connection.agent.request(acp.methods.agent.initialize, {
+                    protocolVersion: acp.PROTOCOL_VERSION,
+                    clientCapabilities: {auth: {_meta: {gateway: true}}},
+                });
+            } finally {
+                connection.close();
+            }
+        };
+        expect(await initialize(true)).toEqual(await initialize(false));
+    });
 });
 
 describe('ACP v2 client capability normalization', () => {
@@ -150,7 +168,7 @@ describe('ACP v2 client capability normalization', () => {
 describe('ACP v2 connection before the v2 send path exists for other standard methods', () => {
     it('forwards extension methods and rejects v1-shaped standard methods without a v2 send path', async () => {
         const client = {notify: vi.fn().mockResolvedValue(undefined), request: vi.fn().mockResolvedValue({})};
-        const view = new AcpV2Connection(client as any).extensionOnlyV1View();
+        const view = new AcpV2Connection(client as any, acpV2.methods.client).extensionOnlyV1View();
 
         await view.notify("_auth/status_update", {authStatus: {kind: "none"}});
         // `session/request_permission` now has a v2 send path (see permissions-v2.test.ts);

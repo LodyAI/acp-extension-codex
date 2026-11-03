@@ -1,5 +1,5 @@
 import {afterEach, describe, expect, it, vi} from 'vitest';
-import type * as acpV2 from '@agentclientprotocol/sdk/experimental/v2/unstable';
+import * as acpV2 from '@agentclientprotocol/sdk/experimental/v2/unstable';
 import {ACPSessionConnection, AcpV2Connection} from '../../ACPSessionConnection';
 import {CodexSubagentEventRouter} from '../../subagents/CodexSubagentEventRouter';
 import {CodexBackgroundTerminalTasks} from '../../async-tasks/CodexBackgroundTerminalTasks';
@@ -18,7 +18,7 @@ function v2Session(sessionId: string): {session: ACPSessionConnection; updates: 
         }),
         request: vi.fn(),
     };
-    const view = new AcpV2Connection(v2Client as any).extensionOnlyV1View();
+    const view = new AcpV2Connection(v2Client as any, acpV2.methods.client).extensionOnlyV1View();
     return {session: new ACPSessionConnection(view, sessionId), updates};
 }
 
