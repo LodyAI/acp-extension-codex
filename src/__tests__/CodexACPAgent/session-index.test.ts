@@ -1026,6 +1026,39 @@ describe("_session/archive and _session/unarchive", () => {
         return {...created, threadArchive, threadUnarchive, threadRead};
     }
 
+    it("Core refuses an open runtime without interrupting or archiving it", async () => {
+        const {fixture, agent} = await createArchiveAgent();
+        await openLocalSession(fixture, threadId);
+        const active = agent.getSessionState(threadId);
+        active.currentTurnId = "still-running";
+        for (const archived of [true, false]) {
+            await expect(agent.sessionIndex.setLodyArchived({sessionId: threadId}, archived)).rejects.toMatchObject({code: -32600});
+        }
+        expect(agent.getSessionState(threadId)).toBe(active);
+        expect(active.currentTurnId).toBe("still-running");
+    });
+
+    it("Core archives cold sessions without enabling the AIR index", async () => {
+        const {agent, appServer} = await createAgent("plain");
+        let archived = false;
+        vi.spyOn(appServer, "threadArchive").mockImplementation(async ({threadId: id}) => {
+            expect(id).toBe(threadId);
+            archived = true;
+            return {};
+        });
+        vi.spyOn(appServer, "threadUnarchive").mockImplementation(async ({threadId: id}) => {
+            expect(id).toBe(threadId);
+            archived = false;
+            return {thread: createThread()};
+        });
+        await expect(agent.sessionIndex.setLodyArchived({sessionId: threadId}, true)).resolves.toEqual({});
+        expect(archived).toBe(true);
+        await expect(agent.sessionIndex.setLodyArchived({sessionId: threadId}, false)).resolves.toEqual({});
+        expect(archived).toBe(false);
+        expect(agent.sessionIndex.enabled).toBe(false);
+        await expect(agent.sessionIndex.setArchived({sessionId: threadId}, true)).rejects.toMatchObject({code: -32601});
+    });
+
     it("archives and unarchives a thread that is not loaded", async () => {
         const {agent, threadArchive, threadUnarchive, threadRead} = await createArchiveAgent();
 
