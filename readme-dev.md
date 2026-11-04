@@ -514,4 +514,12 @@ messages or changing prompt outcomes. No request is made to generate predictions
 native runtime settings and availability remain authoritative.
 
 The prompt-suggestion contract is provided by the pinned
-`acp-extension-core@0.3.0` dependency.
+Core dependency (temporarily pinned to the upstream LodyAI archive contract commit until its release).
+
+## Lody session archive
+
+Core `sessionArchive` v1 advertises `mode: "native"`. `_lody/session/archive`
+and `_lody/session/unarchive` reuse the session index's native idempotent
+mutations in both ACP versions, without opting into AIR or starting a session.
+The client must first release the runtime; an open local session is rejected.
+Native history and identity are preserved.

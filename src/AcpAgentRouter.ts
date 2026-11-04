@@ -1,3 +1,4 @@
+import {LODY_EXTENSION_METHODS} from "acp-extension-core";
 import * as acp from "@agentclientprotocol/sdk/unstable";
 import * as acpV2 from "@agentclientprotocol/sdk/experimental/v2/unstable";
 import {z} from "zod";
@@ -182,6 +183,8 @@ function createRouter(
         .onRequest(LEGACY_SET_SESSION_MODEL_METHOD, legacySetSessionModelParamsParser, (ctx) => getAgent(ctx.params).extMethod(LEGACY_SET_SESSION_MODEL_METHOD, ctx.params))
         .onRequest(LODY_READ_SESSION_HISTORY_METHOD, lodyReadSessionHistoryParamsParser, (ctx) => getAgent().readSessionHistory(ctx.params))
         .onRequest(LODY_RATE_LIMITS_GET_METHOD, lodyRateLimitsGetParamsParser, () => getAgent().readRateLimits())
+        .onRequest(LODY_EXTENSION_METHODS.sessionArchive, sessionArchiveParamsParser, (ctx) => getAgent().sessionIndex.setLodyArchived(ctx.params, true))
+        .onRequest(LODY_EXTENSION_METHODS.sessionUnarchive, sessionArchiveParamsParser, (ctx) => getAgent().sessionIndex.setLodyArchived(ctx.params, false))
         .onRequest(SESSION_STEERING_METHOD, sessionSteerParamsParser, (ctx) => getAgent(ctx.params).extMethod(SESSION_STEERING_METHOD, ctx.params))
         .onRequest(ASYNC_TASK_STOP_METHOD, asyncTaskStopParamsParser, (ctx) => getAgent(ctx.params).extMethod(ASYNC_TASK_STOP_METHOD, ctx.params))
         .onRequest(CODEX_HOOKS_LIST_METHOD, hooksListParamsParser, (ctx) => getAgent().listHooks(ctx.params.cwd))
@@ -216,6 +219,8 @@ function createRouter(
         .onRequest(acpV2.methods.agent.providers.disable, (ctx) => getAgent().disableProvider(ctx.params))
         .onRequest(LODY_READ_SESSION_HISTORY_METHOD, lodyReadSessionHistoryParamsParser, (ctx) => getAgent().readSessionHistory(ctx.params))
         .onRequest(LODY_RATE_LIMITS_GET_METHOD, lodyRateLimitsGetParamsParser, () => getAgent().readRateLimits())
+        .onRequest(LODY_EXTENSION_METHODS.sessionArchive, sessionArchiveParamsParser, (ctx) => getAgent().sessionIndex.setLodyArchived(ctx.params, true))
+        .onRequest(LODY_EXTENSION_METHODS.sessionUnarchive, sessionArchiveParamsParser, (ctx) => getAgent().sessionIndex.setLodyArchived(ctx.params, false))
         .onRequest(SESSION_STEERING_METHOD, sessionSteerParamsParser, (ctx) => getAgent(ctx.params).extMethod(SESSION_STEERING_METHOD, ctx.params))
         .onRequest(GOAL_CONTROL_METHOD, goalControlParamsParser, (ctx) => getAgent(ctx.params).extMethod(GOAL_CONTROL_METHOD, ctx.params))
         .onRequest(ASYNC_TASK_STOP_METHOD, asyncTaskStopParamsParser, (ctx) => getAgent(ctx.params).extMethod(ASYNC_TASK_STOP_METHOD, ctx.params))

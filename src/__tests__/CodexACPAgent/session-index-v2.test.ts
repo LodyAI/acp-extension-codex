@@ -1,3 +1,4 @@
+import {LODY_EXTENSION_METHODS} from "acp-extension-core";
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import * as acp from '@agentclientprotocol/sdk/unstable';
 import * as acpV2 from '@agentclientprotocol/sdk/experimental/v2/unstable';
@@ -191,6 +192,19 @@ describe('AIR sessionIndex over ACP v2', () => {
             codexRequests,
             updates: updates.filter(({update}) => update.sessionUpdate === "session_info_update"),
         })).toMatchFileSnapshot('data/session-index-v2.json');
+    });
+
+    it('serves Core archive and restore without opting into the AIR index', async () => {
+        const {connection, initialize, codexRequests} = await connectV2Client([]);
+        closeClient = () => connection.close();
+        expect(initialize.capabilities?._meta).toMatchObject({lody: {sessionArchive: {version: 1, mode: "native"}}});
+        await expect(connection.agent.request(LODY_EXTENSION_METHODS.sessionArchive, {sessionId})).resolves.toEqual({});
+        await expect(connection.agent.request(LODY_EXTENSION_METHODS.sessionUnarchive, {sessionId})).resolves.toEqual({});
+        expect(codexRequests.filter(({method}) => method === 'thread/archive' || method === 'thread/unarchive')).toEqual([
+            {method: 'thread/archive', params: {threadId: sessionId}},
+            {method: 'thread/unarchive', params: {threadId: sessionId}},
+        ]);
+        expect(codexRequests.some(({method}) => method === 'thread/start' || method === 'turn/start')).toBe(false);
     });
 
     it('pushes the changed rows of a subscription', async () => {

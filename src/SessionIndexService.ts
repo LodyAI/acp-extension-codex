@@ -1,7 +1,7 @@
 /**
  * The AIR `sessionIndex` extension as `CodexAcpServer` serves it: the session list, `_session/rename`,
- * `_session/archive`, `_session/unarchive`, `session/delete` and `_session/list/subscribe`. Nothing here runs
- * for a client that does not declare `sessionIndex`. See `SessionIndex.ts` and `docs/air-extensions.md`.
+ * `_session/archive`, `_session/unarchive`, `session/delete` and `_session/list/subscribe`. AIR operations
+ * require `sessionIndex`; Core archive requests reuse only the native mutations. See `SessionIndex.ts` and `docs/air-extensions.md`.
  */
 
 import path from "node:path";
@@ -242,6 +242,18 @@ export class SessionIndexService {
      */
     async setArchived({sessionId}: SessionArchiveRequest, archived: boolean): Promise<Record<string, never>> {
         this.require(archived ? SESSION_ARCHIVE_METHOD : SESSION_UNARCHIVE_METHOD);
+        return this.applyArchived({sessionId}, archived);
+    }
+
+    /** Core lifecycle requests require an already released runtime. */
+    async setLodyArchived(params: SessionArchiveRequest, archived: boolean): Promise<Record<string, never>> {
+        if (this.host.hasLocalSession(params.sessionId)) {
+            throw RequestError.invalidRequest({sessionId: params.sessionId}, "Close the session before archiving or restoring it");
+        }
+        return this.applyArchived(params, archived);
+    }
+
+    private async applyArchived({sessionId}: SessionArchiveRequest, archived: boolean): Promise<Record<string, never>> {
         logger.log(archived ? "Archiving session..." : "Unarchiving session...", {sessionId});
         await this.host.ensureAppServer();
         // Read before the fence, which counts as open.
