@@ -514,7 +514,7 @@ messages or changing prompt outcomes. No request is made to generate predictions
 native runtime settings and availability remain authoritative.
 
 The prompt-suggestion contract is provided by the pinned
-Core dependency (temporarily pinned to the companion archive contract commit until its release).
+Core dependency (temporarily pinned to the upstream LodyAI archive contract commit until its release).
 
 ## Lody session archive
 
