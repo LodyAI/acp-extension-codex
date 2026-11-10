@@ -11,6 +11,7 @@ import {AIR_NATIVE_SUBAGENT_SESSIONS_KEY, withAirMeta} from "../../AirExtension"
 import {GOAL_CONTROL_METHOD, SESSION_STEERING_METHOD, LEGACY_SET_SESSION_MODEL_METHOD} from "../../AcpExtensions";
 import {SESSION_RENAME_METHOD, SESSION_ARCHIVE_METHOD, SESSION_UNARCHIVE_METHOD} from "../../SessionIndex";
 import {ASYNC_TASK_STOP_METHOD} from "../../async-tasks/AsyncTaskExtension";
+import {LODY_EXTENSION_METHODS} from "acp-extension-core";
 
 const worker = "worker";
 const childId = `${sessionId}:subagent:${worker}`;
@@ -114,6 +115,7 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
             ["session/set_config_option", {configId: "model", value: "gpt-5", ...(version === 2 ? {type: "id"} : {})}],
             ["session/resume", {cwd, mcpServers: []}],
             [SESSION_RENAME_METHOD, {title: "No"}], [SESSION_ARCHIVE_METHOD, {}], [SESSION_UNARCHIVE_METHOD, {}],
+            [LODY_EXTENSION_METHODS.sessionArchive, {}], [LODY_EXTENSION_METHODS.sessionUnarchive, {}],
             [SESSION_STEERING_METHOD, {prompt: [{type: "text", text: "No"}]}],
             [GOAL_CONTROL_METHOD, {action: "clear"}], [ASYNC_TASK_STOP_METHOD, {asyncTaskId: "task"}],
         ];

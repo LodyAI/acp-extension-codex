@@ -1038,6 +1038,19 @@ describe("_session/archive and _session/unarchive", () => {
         expect(active.currentTurnId).toBe("still-running");
     });
 
+    it("Core rejects a session opened while the app server starts instead of closing it", async () => {
+        const {fixture, agent, threadArchive} = await createArchiveAgent();
+        let startAppServer!: () => void;
+        vi.spyOn(agent as unknown as {ensureAppServer(): Promise<void> | undefined}, "ensureAppServer")
+            .mockImplementationOnce(() => new Promise<void>(resolve => { startAppServer = resolve; }));
+        const archive = agent.sessionIndex.setLodyArchived({sessionId: threadId}, true);
+        await openLocalSession(fixture, threadId);
+        startAppServer();
+        await expect(archive).rejects.toMatchObject({code: -32600});
+        expect(agent.getSessionState(threadId)).toBeDefined();
+        expect(threadArchive).not.toHaveBeenCalled();
+    });
+
     it("Core archives cold sessions without enabling the AIR index", async () => {
         const {agent, appServer} = await createAgent("plain");
         let archived = false;
