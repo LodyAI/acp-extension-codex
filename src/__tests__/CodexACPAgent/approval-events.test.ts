@@ -160,7 +160,7 @@ describe("Approval Events", () => {
                     toolCallId: "command-item",
                     kind: "execute",
                     status: "pending",
-                    title: "Run command with file reads",
+                    title: "npm test",
                     rawInput: {command: "npm test", cwd: "/workspace"},
                     locations: [{path: "/workspace/src/a.ts"}, {path: "/workspace/src"}],
                 },

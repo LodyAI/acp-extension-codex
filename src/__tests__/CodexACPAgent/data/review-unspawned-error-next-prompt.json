@@ -14,8 +14,8 @@
       }
     },
     {
-      "sessionUpdate": "session_info_update",
       "title": "hello",
+      "sessionUpdate": "session_info_update",
       "_meta": {
         "lody": {
           "titleSource": "fallback"

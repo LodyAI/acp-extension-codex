@@ -1,0 +1,16 @@
+[
+  {
+    "messageId": "call-question",
+    "content": {
+      "text": "Which environment?\n- Staging\n- Production",
+      "type": "text"
+    },
+    "_meta": {
+      "lody": {
+        "turnId": "turn-1",
+        "messagePhase": "final_answer"
+      }
+    },
+    "sessionUpdate": "agent_message_chunk"
+  }
+]

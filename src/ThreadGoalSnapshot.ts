@@ -1,6 +1,7 @@
-import type {UpdateSessionEvent} from "./ACPSessionConnection";
+import type {ACPSessionConnection, UpdateSessionEvent} from "./ACPSessionConnection";
 import {AIR_GOAL_KEY, withAirMeta} from "./AirExtension";
 import {type GoalSnapshot, type GoalStatus} from "./GoalExtension";
+import {withLodyMetadata} from "./AcpExtensions";
 import type {ThreadGoal} from "./app-server/v2";
 
 export type ThreadGoalSnapshot = GoalSnapshot;
@@ -48,4 +49,14 @@ export function goalSessionInfoUpdate(goal: ThreadGoalSnapshot | null, airClient
         sessionUpdate: "session_info_update",
         _meta: {...(airClient ? withAirMeta(undefined, AIR_GOAL_KEY, goal) : {}), lody: {goal}},
     };
+}
+
+export function publishGoalSessionInfo(session: ACPSessionConnection, goal: ThreadGoalSnapshot | null, airClient: boolean): Promise<void> {
+    const update = goalSessionInfoUpdate(goal, airClient);
+    if (update === null) return Promise.resolve();
+    if (session.protocolVersion !== 2) return session.update(update);
+    return session.patchSessionMetadata(current => ({
+        ...(airClient ? withAirMeta(current, AIR_GOAL_KEY, goal) : {}),
+        ...withLodyMetadata(current, {goal}),
+    }));
 }

@@ -1,58 +1,13 @@
 import type * as acp from "@agentclientprotocol/sdk/unstable";
 import type {
     AdditionalPermissionProfile,
-    CommandAction,
-    CommandExecutionRequestApprovalParams,
     FileChangeRequestApprovalParams,
     RequestPermissionProfile,
     ThreadItem,
 } from "../app-server/v2";
-import {stripShellPrefix} from "../CommandUtils";
 import type {PermissionPromptContext} from "./lifecycle";
 
 type FileChangeItem = ThreadItem & {type: "fileChange"};
-type CommandPresentationParams = CommandExecutionRequestApprovalParams & {
-    additionalPermissions?: AdditionalPermissionProfile | null;
-};
-
-export function commandToolCall(
-    params: CommandPresentationParams,
-    permissionContext: PermissionPromptContext,
-): acp.ToolCallUpdate {
-    const name = permissionContext.commandName(params.threadId, params.itemId);
-    const network = params.networkApprovalContext;
-    const rawInput = {
-        ...(params.command ? {command: stripShellPrefix(params.command)} : {}),
-        ...(params.cwd ? {cwd: params.cwd} : {}),
-        ...(network?.protocol === "http" || network?.protocol === "https"
-            ? {url: `${network.protocol}://${network.host}`}
-            : {}),
-        ...(params.additionalPermissions ? {additionalPermissions: params.additionalPermissions} : {}),
-    };
-    const additionalPermissionContent = params.additionalPermissions
-        ? permissionProfileContent(params.additionalPermissions)
-        : [];
-    return {
-        toolCallId: params.itemId,
-        ...(name !== undefined ? {name} : {}),
-        kind: "execute",
-        status: "pending",
-        title: network
-            ? `${network.protocol} network access to ${network.host}`
-            : commandTitle(params.commandActions),
-        ...(Object.keys(rawInput).length > 0 ? {rawInput} : {}),
-        ...locationsField(unique([
-            ...commandActionPaths(params.commandActions),
-            ...permissionProfilePaths(params.additionalPermissions),
-        ])),
-        ...(network
-            ? {content: [textContent(`${network.protocol} access to ${network.host}`), ...additionalPermissionContent]}
-            : additionalPermissionContent.length > 0
-                ? {content: additionalPermissionContent}
-                : {}),
-    };
-}
-
 export function fileChangeToolCall(
     params: FileChangeRequestApprovalParams,
     permissionContext: PermissionPromptContext,
@@ -84,35 +39,6 @@ export function additionalPermissionsToolCall(
         ...locationsField(permissionProfilePaths(permissions)),
         ...(content.length > 0 ? {content} : {}),
     };
-}
-
-function commandTitle(actions?: CommandAction[] | null): string {
-    const first = actions?.[0];
-    if (!first) return "Run command";
-    switch (first.type) {
-        case "read":
-            return actions?.length === 1 ? "Read file" : "Run command with file reads";
-        case "listFiles":
-            return "List files";
-        case "search":
-            return "Search files";
-        case "unknown":
-            return "Run command";
-    }
-}
-
-function commandActionPaths(actions?: CommandAction[] | null): string[] {
-    return unique((actions ?? []).flatMap(action => {
-        switch (action.type) {
-            case "read":
-                return [action.path];
-            case "listFiles":
-            case "search":
-                return action.path ? [action.path] : [];
-            case "unknown":
-                return [];
-        }
-    }));
 }
 
 function fileChangePaths(item?: FileChangeItem): string[] {

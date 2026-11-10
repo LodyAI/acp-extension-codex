@@ -47,7 +47,7 @@ cannot release its prompt. See the [cancellation boundary decision](.agents/note
 - `LODY_CODEX_PROCESS_TOKEN` - optional nonsecret host-generated UUID identifying one native process use. With managed config and `CODEX_HOME`, the host must first create `../processes/<token>.json` containing `{version: 1, token}`. The adapter writes only the corresponding `<token>.native.json` PID/exit proof and removes the token from native child env. Independent tokens permit concurrent processes for the same home; unknown state delays host credential deletion only. Windows command shims use cross-spawn argument escaping and hide their console; a profile without a process token emits no usage proof. See [the process boundary decision](.agents/notes/proposed/architecture/2026-09-26-managed-profile-process-usage.md).
 - `MODEL_PROVIDER` - model provider to pass to Codex for new sessions.
 - `DEFAULT_AUTH_REQUEST` - ACP auth request JSON used when Codex requires authentication.
-- `INITIAL_AGENT_MODE` - initial mode id: `read-only`, `agent`, `agent-auto-review`, or `agent-full-access`.
+- `INITIAL_AGENT_MODE` - initial mode id: `read-only`, `agent`, `agent-auto-review`, `agent-full-access`, or `permission-profile:<profile-id>`. See [permission profile selection](docs/permission-profiles.md).
 - `NO_BROWSER` - hide browser-based ChatGPT auth when set.
 - `APP_SERVER_LOGS` - directory for adapter logs. App-server stderr always forwards to the adapter's own stderr while the child lives, independent of this variable; the file copy under `<dir>/app-server.log` stays opt-in. stdout remains JSON-RPC only.
 
@@ -60,6 +60,7 @@ remaining race with two pinned native processes, synthetic file-backed tokens,
 and an isolated local refresh endpoint; it uses no real account or keyring.
 - `CODEX_ACP_APP_SERVER_CRASH_LIMIT` - how many crashes of the Codex app-server in the crash window stop its automatic restart (default `5`).
 - `CODEX_ACP_APP_SERVER_CRASH_WINDOW_MS` - the crash window in milliseconds (default `300000`, 5 minutes).
+- `CODEX_ACP_PROMPT_SUGGESTIONS` - set to `false` to turn off the AIR follow-up prediction fallback. It costs one extra model call per turn on the session's model, mostly from cached context. Clients negotiating Core `promptSuggestions` use native predictions instead; this setting does not disable those notifications.
 
 ### Quick start
 
@@ -317,6 +318,16 @@ The adapter restarts the Codex app-server when it dies (for example, killed for 
 - Codex writes a thread to disk only with its first message, so a session without messages cannot be resumed in a new
   app-server, after a crash or a provider restart. Its next use fails with "had no messages yet and was lost"; the
   client starts a new session. A provider restart still completes for the agent and the other sessions.
+  A `providers/set` with the routing (base URL, API type, headers) that the last `providers/set` applied does not
+  restart the app-server: it waits for a provider update in flight and succeeds. After a failed provider update it
+  restarts again.
+- The app-server starts with the provider of the routing as `-c model_provider=…` and `-c model_providers.<id>=…`
+  overrides, for that process only; the user's `config.toml` is not changed. The provider is the gateway of
+  `providers/set` or of the `gateway` auth method, else `MODEL_PROVIDER`, else `model_provider` of `CODEX_CONFIG`.
+  Header values go in `CODEX_ACP_PROVIDER_HEADER_<n>` environment variables through `env_http_headers`, so that they
+  are not in the process arguments. Codex 0.166 and later refuse input for a thread whose provider is not the one of
+  its app-server, so a `providers/set`, `providers/disable` or `authenticate` that changes the provider restarts the
+  app-server even when no session is open.
 - After `CODEX_ACP_APP_SERVER_CRASH_LIMIT` crashes in the crash window the adapter stops restarting it and says so,
   with the stderr of the last crash.
   A session that the app-server died opening twice in 30 minutes is not opened again for the rest of that time, so
@@ -342,6 +353,8 @@ to v2; it reuses the runtime environment variables above.
 
 Both ACP versions advertise `systemPrompt: {}`: text-only `append` mode. Override and non-text
 content are rejected with `-32602` before a session is created or a fork is made.
+An empty `content` array is also rejected before any lifecycle change; it does not clear
+existing client or AIR instructions.
 Text blocks are joined with a blank line and appended to the existing developer-instruction
 baseline: AIR `customInstructions` when supplied, otherwise configured Codex developer instructions.
 Codex's base instructions and workspace context remain intact. Requests without `systemPrompt`
@@ -483,7 +496,7 @@ JSON-RPC batches. Parent setup operations serialize without waiting on each othe
 
 `providers/set` lists the models of the gateway (`GET {baseUrl}/models`, with the headers Codex sends to it)
 before it responds. The models reported to the client are then only the Codex models whose `model` or `id` the
-gateway lists, matched without case and date suffix. A session whose thread model the gateway does not list uses
+gateway lists, matched without case, vendor prefix (`openai/gpt-5.4`, as OpenRouter lists it) and date suffix. A session whose thread model the gateway does not list uses
 the default of these models; a thread model that the gateway lists but Codex does not know is kept. A gateway that
 lists none of the Codex models leaves no model option at all, and the session keeps the thread's model as current.
 Sessions already open get the models of the new routing when the provider restart resumes them, after

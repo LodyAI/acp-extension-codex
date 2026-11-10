@@ -136,6 +136,56 @@ describe('session/cancel and session/close over ACP v2', () => {
         ]);
     });
 
+    it.each(["ack-before-end", "end-before-ack", "late-no-active"] as const)(
+        "does not cancel a later prompt while an older interrupt is pending (%s)", async ordering => {
+            const client = await connectSession();
+            closeClient = () => client.connection.close();
+            const interrupting = deferred<void>();
+            const release = deferred<void>();
+            const cancel = vi.spyOn(client.agent, "cancel");
+            let interrupts = 0;
+            client.setCodexResponse("turn/interrupt", async () => {
+                if (++interrupts === 1) {
+                    interrupting.resolve();
+                    await release.promise;
+                    if (ordering === "late-no-active") throw new Error("no active turn to interrupt");
+                }
+                return {};
+            });
+            try {
+                const first = client.sendPrompt([{type: "text", text: "First"}]);
+                await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(1));
+                client.emit(turnStarted());
+                client.emit(itemCompleted(userMessageItem(client.turnStartParams[0]!["clientUserMessageId"] as string)));
+                await first;
+                const beforeCancel = client.sendPrompt([{type: "text", text: "Before cancellation"}]);
+                await settle();
+                await client.cancel();
+                await interrupting.promise;
+                await expect(beforeCancel).rejects.toMatchObject({code: -32800});
+                const afterCancel = client.sendPrompt([{type: "text", text: "After cancellation"}]);
+                await settle();
+                expect(client.turnStartParams).toHaveLength(1);
+                if (ordering === "ack-before-end") release.resolve();
+                client.emit(turnFinished("interrupted"));
+                await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(2));
+                client.emit(turnStarted("turn-2"));
+                const messageId = client.turnStartParams[1]!["clientUserMessageId"] as string;
+                client.emit(itemCompleted(userMessageItem(messageId, "After cancellation"), "turn-2"));
+                await expect(afterCancel).resolves.toEqual(expect.objectContaining({messageId}));
+                release.resolve();
+                await cancel.mock.results[0]!.value;
+                expect(client.turnInterruptCalls()).toEqual([{threadId: sessionId, turnId}]);
+                client.emit(turnCompleted("turn-2"));
+                await client.promptRunFinished(1);
+                await settle();
+                expect(stateUpdates(client.transcript).at(-1)).toEqual({state: "idle", stopReason: "end_turn"});
+            } finally {
+                release.resolve();
+            }
+        },
+    );
+
     it('drops a queued prompt with -32800 on session/close', async () => {
         const client = await connectSession();
         closeClient = null; // closeSession below already tears the session down.
@@ -345,8 +395,7 @@ describe('session/cancel and session/close over ACP v2', () => {
         await client.cancel();
         await vi.waitFor(() => expect(capturedSignal!.aborted).toBe(true));
 
-        // A conforming client answers `cancelled` once it has seen `session/cancel`.
-        permission.resolve({outcome: {outcome: "cancelled"}});
+        // Cancellation stops the wait even if the client never answers the withdrawn request.
         expect(await approvalPromise).toEqual({decision: "cancel"});
 
         client.emit(itemCompleted(userMessageItem(clientUserMessageId)));
@@ -355,6 +404,9 @@ describe('session/cancel and session/close over ACP v2', () => {
         await client.promptRunFinished();
         await settle();
 
+        // A late approval cannot resume the cancelled work.
+        permission.resolve({outcome: {outcome: "selected", optionId: "accept"}});
+        await settle();
         // Withdrawing the interaction does not resume cancelled foreground work.
         const transcript = client.transcript.slice(start);
         expect(stateUpdates(transcript)).toEqual([
@@ -396,8 +448,8 @@ describe('session/cancel and session/close over ACP v2', () => {
         await client.cancel();
         await vi.waitFor(() => expect(capturedSignal!.aborted).toBe(true));
 
-        permission.resolve({outcome: {outcome: "cancelled"}});
         await client.promptRunFinished(1);
+        permission.resolve({outcome: {outcome: "selected", optionId: "accept"}});
         await settle();
 
         // No implementation turn is started once the review is cancelled.

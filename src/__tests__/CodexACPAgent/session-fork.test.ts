@@ -54,6 +54,8 @@ describe("ACP session fork", () => {
             currentModelId: "model-id[medium]",
             models: [model],
             collaborationMode: "default",
+            permissionProfiles: [],
+            activePermissionProfileId: null,
             modelProvider: "openai",
             currentServiceTier: null,
             additionalDirectories: ["/workspace/extra"],

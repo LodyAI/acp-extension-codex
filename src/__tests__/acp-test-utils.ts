@@ -206,7 +206,14 @@ export function createBaseTestFixture(config: ConnectionConfig): TestFixture {
  * Use for integration tests that need to interact with the actual Codex binary.
  */
 export function createTestFixture(): TestFixture {
-    const pathToCodex = path.resolve(process.cwd(), "node_modules", ".bin", process.platform === 'win32' ? "codex.cmd" : "codex");
+    const bundledCodexPath = path.resolve(
+        process.cwd(),
+        "node_modules",
+        ".bin",
+        process.platform === 'win32' ? "codex.cmd" : "codex",
+    );
+    const pathToCodex = process.env["CODEX_PATH"] ?? bundledCodexPath;
+
     if (!fs.existsSync(pathToCodex)) {
         throw new Error(`Codex binary not found at ${pathToCodex}. Did you run 'npm install'?`);
     }
@@ -312,7 +319,9 @@ export function createCodexMockTestFixture(
     };
 
     const mockCodexConnection = {
-        sendRequest: () => Promise.resolve(undefined),
+        sendRequest: (method: string) => Promise.resolve(
+            method === "thread/backgroundTerminals/list" ? {data: [], nextCursor: null} : undefined,
+        ),
         onClose: () => ({ dispose: () => {} }),
         onUnhandledNotification: (handler: (notification: any) => void) => {
             unhandledNotificationHandler = handler;
@@ -460,6 +469,7 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
         supportedReasoningEfforts: [],
         supportedInputModalities: ["text", "image"],
         agentMode: AgentMode.DEFAULT_AGENT_MODE,
+        availableAgentModes: AgentMode.all(),
         collaborationMode: DEFAULT_COLLABORATION_MODE,
         fastModeEnabled: false,
         currentModelSupportsFast: false,

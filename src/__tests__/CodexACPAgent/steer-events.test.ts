@@ -50,7 +50,7 @@ describe('_lody/session/steer', () => {
         vi.clearAllMocks();
     });
 
-    it('reports injected when the input joins the active turn', async () => {
+    it.each([null, undefined, {steering: {idleBehavior: "promptRequired"}}])('reports injected when the input joins the active turn (metadata: %j)', async (_meta) => {
         const {mockFixture, sessionState, turnCompleted} = startActiveTurn();
         const turnSteerSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "turnSteer")
             .mockResolvedValue({turnId: "turn-id"});
@@ -67,10 +67,10 @@ describe('_lody/session/steer', () => {
             sessionId: "session-id",
             prompt: [{type: "text", text: "also keep backward compatibility"}],
             steerId: "steer-active",
+            _meta,
         })).resolves.toEqual({outcome: "injected"});
 
-        // Every steer mints a fresh `clientUserMessageId` (Codex-side param only; no ACP wire
-        // change on v1).
+        // Preserve the host steer identity in the native request.
         expect(turnSteerSpy).toHaveBeenCalledWith({
             threadId: "session-id",
             expectedTurnId: "turn-id",
@@ -200,6 +200,28 @@ describe('_lody/session/steer', () => {
         await expect(mockFixture.getCodexAcpAgent().extMethod(SESSION_STEERING_METHOD, {
             sessionId: "session-id",
         })).rejects.toThrow(RequestError);
+    });
+
+    it.each([
+        [],
+        false,
+        "invalid",
+        {steering: null},
+        {steering: []},
+        {steering: "invalid"},
+        {steering: {idleBehavior: null}},
+        {steering: {idleBehavior: "startDetachedTurn"}},
+    ])('rejects malformed steering metadata without starting or injecting a turn (%j)', async (_meta) => {
+        const mockFixture = createCodexMockTestFixture();
+        const turnStartSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "turnStart");
+        const turnSteerSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "turnSteer");
+        await expect(mockFixture.getCodexAcpAgent().extMethod(SESSION_STEERING_METHOD, {
+            sessionId: "session-id",
+            prompt: [{type: "text", text: "do not consume this"}],
+            _meta,
+        })).rejects.toThrow(RequestError);
+        expect(turnStartSpy).not.toHaveBeenCalled();
+        expect(turnSteerSpy).not.toHaveBeenCalled();
     });
 
     it('rejects image input when the model does not support it', async () => {

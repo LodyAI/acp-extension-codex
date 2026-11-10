@@ -18,14 +18,22 @@
       "delete": {},
       "additionalDirectories": {},
       "systemPrompt": {},
-      "fork": {}
+      "fork": {},
+      "title": {}
     },
     "auth": {
       "_meta": {
         "authStatus": {}
       }
     },
-    "providers": {}
+    "providers": {},
+    "_meta": {
+      "lody": {
+        "promptSuggestions": {
+          "version": 1
+        }
+      }
+    }
   },
   "authMethods": [
     {

@@ -21,6 +21,7 @@
       "close": {},
       "delete": {},
       "fork": {},
+      "title": {},
       "additionalDirectories": {},
       "subagents": {},
       "systemPrompt": {}
@@ -32,6 +33,9 @@
     },
     "_meta": {
       "lody": {
+        "promptSuggestions": {
+          "version": 1
+        },
         "subagentEvents": {
           "version": 1
         },

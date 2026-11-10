@@ -1,4 +1,4 @@
-import {additionalPermissionsToolCall, commandToolCall, fileChangeToolCall} from "./presentation";
+import {additionalPermissionsToolCall, fileChangeToolCall} from "./presentation";
 import * as acp from "@agentclientprotocol/sdk/unstable";
 import type {ApprovalHandler} from "../CodexAppServerClient";
 import type {
@@ -56,9 +56,7 @@ export class CodexApprovalHandler implements ApprovalHandler {
         try {
             const response = await this.requestPermission({
                 sessionId: params.threadId,
-                toolCall: !this.renderer.capabilities.airClient
-                    ? commandToolCall(authoritativeParams, this.permissionContext)
-                    : this.renderer.renderPermissionToolCall(CommandReporter.permission(
+                toolCall: this.renderer.renderPermissionToolCall(CommandReporter.permission(
                     authoritativeParams,
                     this.permissionContext.commandStarted(params.threadId, params.itemId),
                     this.permissionContext.commandName(params.threadId, params.itemId),

@@ -1,14 +1,15 @@
 /**
  * The AIR `sessionIndex` extension as `CodexAcpServer` serves it: the session list, `_session/rename`,
- * `_session/archive`, `_session/unarchive`, `session/delete` and `_session/list/subscribe`. Nothing here runs
- * for a client that does not declare `sessionIndex`. See `SessionIndex.ts` and `docs/air-extensions.md`.
+ * `_session/archive`, `_session/unarchive`, `session/delete` and `_session/list/subscribe`.
+ * `session/set_title` shares its title writer without requiring AIR capabilities.
+ * See `SessionIndex.ts` and `docs/air-extensions.md`.
  */
 
 import path from "node:path";
 import type * as acp from "@agentclientprotocol/sdk/unstable";
 import {RequestError} from "@agentclientprotocol/sdk/unstable";
 import {ACPSessionConnection, type AcpClientConnection} from "./ACPSessionConnection";
-import {clientSupportsAirCapability, withAirMeta} from "./AirExtension";
+import {clientSupportsAirCapability, publishAirSessionMetadata} from "./AirExtension";
 import type {ServerNotification} from "./app-server";
 import type {CodexAcpClient} from "./CodexAcpClient";
 import type {SessionState} from "./CodexAcpServer";
@@ -85,13 +86,14 @@ export class SessionIndexService {
     constructor(private readonly host: SessionIndexHost, subscriptionTimings?: SessionListSubscriptionTimings) {
         this.activity = new SessionIndexActivity(threadId => host.session(threadId) !== undefined);
         this.titles = new SessionIndexTitles(host, this.writes);
-        // `thread/list` gives no fork parent: a row gets it once the rollout is read, a subscription with a change.
-        this.forkOrigins = new SessionForkOrigins({onFound: (threadIds) => this.subscriptions.threadsChanged(threadIds)});
+        const reader = () => {
+            const appServer = host.client().appServerClient;
+            return appServer.connectionLoss.lost ? null : appServer;
+        };
+        // `thread/list` gives no fork parent: a row gets it once `thread/read` gave it, a subscription with a change.
+        this.forkOrigins = new SessionForkOrigins({reader, onFound: (threadIds) => this.subscriptions.threadsChanged(threadIds)});
         this.subscriptions = new SessionListSubscriptions({
-            reader: () => {
-                const appServer = host.client().appServerClient;
-                return appServer.connectionLoss.lost ? null : appServer;
-            },
+            reader,
             codexHome: () => host.client().getHomePath(),
             rows: async (entries) => await this.rows(entries),
             // The canonical path too outside a Git checkout, where linkedWorktreeCwds gives the cwd alone.
@@ -166,7 +168,8 @@ export class SessionIndexService {
         const entries = await this.host.runWithProcessCheck(() => readSessionBatchMetadata(
             client.appServerClient, client.getHomePath(), sessionIds,
         ));
-        return {sessions: await this.rows(entries, true)};
+        // `thread/read` gives the fork parent, so the rows need no background read for it.
+        return {sessions: await this.rows(entries.map(entry => ({...entry, read: true as const})), true)};
     }
 
     /**
@@ -229,9 +232,14 @@ export class SessionIndexService {
     /** `_session/rename`. */
     async rename({sessionId, title}: SessionRenameRequest): Promise<Record<string, never>> {
         this.require(SESSION_RENAME_METHOD);
-        await this.host.ensureAppServer();
-        await this.titles.rename(sessionId, title);
+        await this.setTitle({sessionId, title});
         return {};
+    }
+
+    /** Standard title requests share persistence, normalization and automatic-title suppression with AIR. */
+    async setTitle({sessionId, title}: acp.SetSessionTitleRequest): Promise<acp.SetSessionTitleResponse> {
+        await this.host.ensureAppServer();
+        return {title: await this.titles.rename(sessionId, title)};
     }
 
     /**
@@ -265,15 +273,12 @@ export class SessionIndexService {
                     throw sessionNotFoundRequestError(sessionId);
                 }
             });
+            // Tell the client why it closed before ending this operation's delivery fence.
+            if (archived ? open : this.host.session(sessionId) !== undefined) {
+                await publishAirSessionMetadata(new ACPSessionConnection(this.host.connection(), sessionId), AIR_ARCHIVED_KEY, archived);
+            }
         } finally {
             if (archived) this.host.endSessionCloseFence(sessionId);
-        }
-        // An archived session was closed above: the update still goes to its client, to tell it why.
-        if (archived ? open : this.host.session(sessionId) !== undefined) {
-            await new ACPSessionConnection(this.host.connection(), sessionId).update({
-                sessionUpdate: "session_info_update",
-                _meta: withAirMeta(undefined, AIR_ARCHIVED_KEY, archived),
-            });
         }
         return {};
     }
@@ -343,6 +348,7 @@ export class SessionIndexService {
         const inAgentWorktree = (cwd: string): boolean =>
             !(skipUncCwds && isUncPath(cwd)) && this.codexWorktrees.isCodexWorktreeCwd(cwd);
         return entries.map(entry => {
+            if (entry.read) this.forkOrigins.readElsewhere(entry.thread);
             const forkedFromId = this.forkOrigins.originOf(entry.thread);
             const thread = forkedFromId === entry.thread.forkedFromId ? entry.thread : {...entry.thread, forkedFromId};
             const activity = this.activity.activityOf(thread);

@@ -1,8 +1,15 @@
 import {airOnlyMeta, AIR_KIND_KEY} from "./AirExtension";
-import type {ApprovalsReviewer, AskForApproval, SandboxMode, SandboxPolicy} from "./app-server/v2";
+import type {
+    ApprovalsReviewer,
+    AskForApproval,
+    PermissionProfileSummary,
+    SandboxMode,
+    SandboxPolicy,
+} from "./app-server/v2";
 import type {SessionConfigOption, SessionMode, SessionModeState} from "@agentclientprotocol/sdk/unstable";
 
 export const MODE_CONFIG_ID = "mode";
+const PERMISSION_PROFILE_MODE_PREFIX = "permission-profile:";
 
 type AgentModeKind = "plan" | "auto_review" | "standard" | "full_access";
 
@@ -10,21 +17,23 @@ export class AgentMode {
     readonly id: string;
     readonly name: string;
     readonly description: string;
-    readonly kind: AgentModeKind;
+    readonly kind: AgentModeKind | null;
     readonly approvalPolicy: AskForApproval;
     readonly approvalsReviewer: ApprovalsReviewer;
-    readonly sandboxPolicy: SandboxPolicy;
-    readonly sandboxMode: SandboxMode;
+    readonly sandboxPolicy: SandboxPolicy | null;
+    readonly sandboxMode: SandboxMode | null;
+    readonly permissionProfileId: string | null;
 
     private constructor(
         id: string,
         name: string,
         description: string,
-        kind: AgentModeKind,
+        kind: AgentModeKind | null,
         approvalPolicy: AskForApproval,
         approvalsReviewer: ApprovalsReviewer,
-        sandboxPolicy: SandboxPolicy,
-        sandboxMode: SandboxMode,
+        sandboxPolicy: SandboxPolicy | null,
+        sandboxMode: SandboxMode | null,
+        permissionProfileId: string | null = null,
     ) {
         this.id = id;
         this.name = name;
@@ -34,6 +43,7 @@ export class AgentMode {
         this.approvalsReviewer = approvalsReviewer;
         this.sandboxPolicy = sandboxPolicy;
         this.sandboxMode = sandboxMode; // same as sandboxPolicy, need to look for
+        this.permissionProfileId = permissionProfileId;
     }
 
     static readonly ReadOnly = new AgentMode(
@@ -101,18 +111,42 @@ export class AgentMode {
             id: this.id,
             name: this.name,
             description: this.description,
-            _meta: {kind: this.kind, ...airOnlyMeta(airClient, AIR_KIND_KEY, this.kind)},
+            ...(this.kind === null ? {} : {_meta: {kind: this.kind, ...airOnlyMeta(airClient, AIR_KIND_KEY, this.kind)}}),
         };
     }
 
-    toSessionModeState(_airClient = false): SessionModeState {
+    toSessionModeState(airClient = false, availableModes: AgentMode[] = AgentMode.all()): SessionModeState {
         return {
-            availableModes: AgentMode.all().map(mode => mode.toSessionMode(_airClient)),
+            availableModes: availableModes.map(mode => mode.toSessionMode(airClient)),
             currentModeId: this.id
         };
     }
 
-    toConfigOption(_airClient = false): SessionConfigOption {
+    toConfigOption(airClient = false, availableModes: AgentMode[] = AgentMode.all()): SessionConfigOption {
+        const toOptions = (modes: AgentMode[]) => modes.map(mode => {
+            const meta = mode.kind === null ? undefined : {kind: mode.kind, ...airOnlyMeta(airClient, AIR_KIND_KEY, mode.kind)};
+            return {
+                value: mode.id,
+                name: mode.name,
+                description: mode.description,
+                ...(meta ? {_meta: meta} : {}),
+            };
+        });
+        const permissionProfileModes = availableModes.filter(mode => mode.permissionProfileId !== null);
+        const options = permissionProfileModes.length === 0
+            ? toOptions(availableModes)
+            : [
+                {
+                    group: "sandbox-modes",
+                    name: "Sandbox Modes",
+                    options: toOptions(availableModes.filter(mode => mode.permissionProfileId === null)),
+                },
+                {
+                    group: "permission-profiles",
+                    name: "Permission Profiles",
+                    options: toOptions(permissionProfileModes),
+                },
+            ];
         return {
             id: MODE_CONFIG_ID,
             name: "Mode",
@@ -120,30 +154,56 @@ export class AgentMode {
             category: "mode",
             type: "select",
             currentValue: this.id,
-            options: AgentMode.all().map(mode => ({
-                value: mode.id,
-                name: mode.name,
-                description: mode.description,
-                _meta: {kind: mode.kind, ...airOnlyMeta(_airClient, AIR_KIND_KEY, mode.kind)},
-            })),
+            options,
         };
     }
 
-    static all(): AgentMode[] {
-        return [AgentMode.ReadOnly, AgentMode.Agent, AgentMode.AgentAutoReview, AgentMode.AgentFullAccess];
+    static all(
+        permissionProfiles: PermissionProfileSummary[] = [],
+        permissionProfileApprovalPolicy: AskForApproval = "on-request",
+        permissionProfileApprovalsReviewer: ApprovalsReviewer = "user",
+    ): AgentMode[] {
+        const profileModes = permissionProfiles
+            .filter(profile => profile.allowed && !profile.id.startsWith(":"))
+            .map(profile => new AgentMode(
+                `${PERMISSION_PROFILE_MODE_PREFIX}${profile.id}`,
+                profile.id,
+                profile.description ?? `Use the ${profile.id} Codex permission profile.`,
+                null,
+                permissionProfileApprovalPolicy,
+                permissionProfileApprovalsReviewer,
+                null,
+                null,
+                profile.id,
+            ));
+        return [
+            AgentMode.ReadOnly,
+            AgentMode.Agent,
+            AgentMode.AgentAutoReview,
+            AgentMode.AgentFullAccess,
+            ...profileModes,
+        ];
     }
 
-    static find(modeId: string): AgentMode | null {
-        const match = AgentMode.all().find(m => m.id === modeId);
+    static find(modeId: string, availableModes: AgentMode[] = AgentMode.all()): AgentMode | null {
+        const match = availableModes.find(m => m.id === modeId);
         return match ?? null;
     }
 
-    static getInitialAgentMode(): AgentMode {
+    static getInitialAgentMode(
+        availableModes: AgentMode[] = AgentMode.all(),
+        activePermissionProfileId: string | null = null,
+    ): AgentMode {
         const predefinedAgentMode = process.env["INITIAL_AGENT_MODE"];
         if (predefinedAgentMode) {
-            return AgentMode.find(predefinedAgentMode) ?? AgentMode.DEFAULT_AGENT_MODE;
-        } else {
-            return AgentMode.DEFAULT_AGENT_MODE;
+            return AgentMode.find(predefinedAgentMode, availableModes) ?? AgentMode.DEFAULT_AGENT_MODE;
         }
+        if (activePermissionProfileId !== null) {
+            const profileMode = availableModes.find(mode => mode.permissionProfileId === activePermissionProfileId);
+            if (profileMode) {
+                return profileMode;
+            }
+        }
+        return AgentMode.DEFAULT_AGENT_MODE;
     }
 }

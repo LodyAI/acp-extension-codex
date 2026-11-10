@@ -5,6 +5,7 @@
       "terminalId": "command",
       "command": "sleep 12",
       "cwd": "/workspace",
+      "_meta": null,
       "sessionUpdate": "terminal_update"
     }
   },
@@ -25,6 +26,7 @@
         "command": "sleep 12",
         "cwd": "/workspace"
       },
+      "_meta": null,
       "sessionUpdate": "tool_call_update"
     }
   },
@@ -47,6 +49,7 @@
     "update": {
       "messageId": "saved",
       "content": [],
+      "_meta": null,
       "sessionUpdate": "agent_message"
     }
   },
