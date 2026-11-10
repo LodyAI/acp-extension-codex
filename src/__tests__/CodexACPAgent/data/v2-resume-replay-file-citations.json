@@ -1,0 +1,18 @@
+[
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "messageId": "cited-reply",
+      "content": {
+        "text": "The limit is 12.\n\n[policy.txt](/workspace/policy.txt)",
+        "type": "text"
+      },
+      "_meta": {
+        "lody": {
+          "turnId": "01990000-0000-7000-8000-000000000003"
+        }
+      },
+      "sessionUpdate": "agent_message_chunk"
+    }
+  }
+]

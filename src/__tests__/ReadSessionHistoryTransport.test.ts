@@ -8,6 +8,10 @@ import {ACPSessionConnection, AcpV2Connection} from "../ACPSessionConnection";
 
 async function connectRouter(version: 1 | 2) {
     const router = createAcpAgentRouter(connection => ({
+        observeInitializeResponse() {},
+        afterInitializeResponse() {},
+        observeSessionSetupResponses() { return () => {}; },
+        assertSessionMutationAllowed() {},
         async initialize() {
             return {protocolVersion: 1, agentCapabilities: {_meta: {lody: CODEX_LODY_CAPABILITIES}}, authMethods: []};
         },

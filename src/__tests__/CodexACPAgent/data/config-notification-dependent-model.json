@@ -1,0 +1,31 @@
+[
+  {
+    "id": "mode",
+    "currentValue": "agent",
+    "values": [
+      "read-only",
+      "agent",
+      "agent-auto-review",
+      "agent-full-access"
+    ]
+  },
+  {
+    "id": "plan_mode",
+    "currentValue": false
+  },
+  {
+    "id": "model",
+    "currentValue": "slow-model",
+    "values": [
+      "fast-model",
+      "slow-model"
+    ]
+  },
+  {
+    "id": "reasoning_effort",
+    "currentValue": "low",
+    "values": [
+      "low"
+    ]
+  }
+]

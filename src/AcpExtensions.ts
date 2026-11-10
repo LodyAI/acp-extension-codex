@@ -1,3 +1,6 @@
+import type {ACPSessionConnection} from "./ACPSessionConnection";
+import type {SessionInfoFields} from "./AcpV2SessionInfo";
+import {recordOrNull} from "./permissions/json";
 import type {
     AvailableCommand,
     ClientContext,
@@ -200,4 +203,20 @@ export async function steerSessionWithFallback(
     params: SessionSteerRequest,
 ): Promise<SessionSteeringResponse> {
     return await connection.request<SessionSteeringResponse, SessionSteerRequest>(SESSION_STEERING_METHOD, params);
+}
+
+/** Compose Lody-owned fields without changing the protocol's shallow metadata patches. */
+export function withLodyMetadata(current: Readonly<Record<string, unknown>>, fields: Record<string, unknown>): Record<string, unknown> {
+    return {lody: {...recordOrNull(current["lody"]), ...fields}};
+}
+
+export function publishLodySessionMetadata(
+    session: ACPSessionConnection,
+    metadata: Record<string, unknown>,
+    fields: SessionInfoFields = {},
+): Promise<void> {
+    if (session.protocolVersion === 2) {
+        return session.patchSessionMetadata(current => withLodyMetadata(current, metadata), fields);
+    }
+    return session.update({...fields, sessionUpdate: "session_info_update", _meta: {lody: metadata}});
 }

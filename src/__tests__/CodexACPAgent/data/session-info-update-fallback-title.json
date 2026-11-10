@@ -4,8 +4,8 @@
     {
       "sessionId": "test-session-id",
       "update": {
-        "sessionUpdate": "session_info_update",
         "title": "Fix the flaky test in CI",
+        "sessionUpdate": "session_info_update",
         "_meta": {
           "lody": {
             "titleSource": "fallback"

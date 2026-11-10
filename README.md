@@ -9,15 +9,17 @@ Use [OpenAI Codex](https://github.com/openai/codex) from [Agent Client Protocol]
 ## Features
 
 - ChatGPT, API key, and client-provided custom gateway authentication.
-- Model, reasoning effort, fast mode, approval, and sandbox mode configuration.
+- Model, reasoning effort, fast mode, approval, and sandbox mode, and configured [Codex permission profile](docs/permission-profiles.md) selection.
 - Concrete recommended model and reasoning-effort values through the opt-in [AIR recommended config values](docs/recommended-config-values-extension.md) capability.
 - Text prompts, embedded context, images, resource links, and additional workspace directories.
-- Shell command, file change, [permission request](docs/permission-extension.md), MCP tool call, terminal output, reasoning, plan, web search, image generation, image view, token usage, and review events.
+- Shell command, file change, [permission request](docs/permission-extension.md), MCP tool call, terminal output, reasoning, [plan](docs/plans.md), web search, image generation, image view, token usage, and review events.
 - [Native ACP subagent sessions](docs/subagent-sessions.md) (after capability negotiation) with separate child histories and root-routed permissions; a legacy tool-call fallback otherwise.
 - [Background terminal tasks](docs/async-tasks.md) in AIR, with task status and targeted stop support after capability negotiation.
 - Without native subagent negotiation, subagent launches remain standard ACP tool calls with provider-neutral lifecycle data in `_meta.lody.task`; Codex thread details remain available in `_meta.codex`.
 - Session-scoped long-running goals through the provider-neutral [goal extension](docs/goal-extension.md).
 - A per-turn [agent file-change report](docs/agent-file-change-report.md) after capability negotiation.
+- [Async Codex questions](docs/async-questions.md) as non-blocking form elicitations.
+- Mid-turn input through the [_session/steering extension](docs/steering.md), including an opt-in host-owned idle fallback.
 - Client-provided MCP servers over command-based stdio config and HTTP transport.
 - Native ACP session forking through Codex App Server `thread/fork`.
 - Acknowledged steering of an active Codex turn through app-server `turn/steer`.
@@ -113,7 +115,7 @@ does not allow another prompt to start.
 - `CODEX_CONFIG` - JSON object merged into the Codex session config.
 - `MODEL_PROVIDER` - model provider to pass to Codex for new sessions.
 - `DEFAULT_AUTH_REQUEST` - ACP auth request JSON used when Codex requires authentication.
-- `INITIAL_AGENT_MODE` - initial mode id: `read-only`, `agent`, `agent-auto-review`, or `agent-full-access`.
+- `INITIAL_AGENT_MODE` - initial mode id: `read-only`, `agent`, `agent-auto-review`, `agent-full-access`, or `permission-profile:<profile-id>`.
 - `NO_BROWSER` - hide browser-based ChatGPT auth when set.
 - `APP_SERVER_LOGS` - directory for adapter logs.
 
