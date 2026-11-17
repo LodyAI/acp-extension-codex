@@ -75,7 +75,7 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "~2.5.0",
-    "@openai/codex": "^0.166.0",
+    "@openai/codex": "^0.169.0",
     "acp-extension-core": "0.3.0",
     "cross-spawn": "^7.0.6",
     "diff": "^9.0.0",
