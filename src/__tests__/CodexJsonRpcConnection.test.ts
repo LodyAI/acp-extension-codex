@@ -17,7 +17,20 @@ vi.mock('cross-spawn', async () => {
 });
 const roots: string[] = [];
 const children: ChildProcessWithoutNullStreams[] = [];
-const fixture = "require('node:readline').createInterface({input:process.stdin}).on('line', line => {const request=JSON.parse(line);process.stdout.write(JSON.stringify({id:request.id,result:{args:process.argv.slice(1),home:process.env.CODEX_HOME,token:process.env.LODY_CODEX_PROCESS_TOKEN??null}})+'\\n');});";
+const fixture = `
+    const input = require('node:readline').createInterface({input: process.stdin});
+    input.on('line', line => {
+        const request = JSON.parse(line);
+        const result = request.method === 'electron-node-mode'
+            ? process.env.ELECTRON_RUN_AS_NODE ?? null
+            : {
+                args: process.argv.slice(1),
+                home: process.env.CODEX_HOME,
+                token: process.env.LODY_CODEX_PROCESS_TOKEN ?? null,
+            };
+        process.stdout.write(JSON.stringify({id: request.id, result}) + '\\n');
+    });
+`;
 const stderrFixture = "process.stderr.write('app-server diagnostic line\\n');" + "require('node:readline').createInterface({input:process.stdin}).on('line', line => {const request=JSON.parse(line);process.stdout.write(JSON.stringify({id:request.id,result:{echo:request.method}})+'\\n');});";
 
 async function spawnStderrFixture(spawnFn: typeof spawn) {
@@ -91,6 +104,18 @@ describe('startCodexConnection', () => {
         const native = startCodexConnection('C:\\Program Files\\Codex\\codex.cmd', env);
         expect(await native.connection.sendRequest('probe')).toEqual({args: ['app-server'], home: env.CODEX_HOME, token: null});
         expect(test.observed()).toEqual({command: 'C:\\Program Files\\Codex\\codex.cmd', args: ['app-server'], shell: undefined, windowsHide: true});
+    });
+
+    it.each([
+        ['/synthetic/codex', null],
+        [undefined, '1'],
+    ])('scopes Electron Node mode to the bundled JS launcher (Codex path %s)', async (codexPath, expected) => {
+        await processFixture();
+        const env = {ELECTRON_RUN_AS_NODE: '1'};
+        const codex = startCodexConnection(codexPath, env);
+
+        expect(await codex.connection.sendRequest('electron-node-mode')).toBe(expected);
+        expect(env.ELECTRON_RUN_AS_NODE).toBe('1');
     });
 
     it('forwards live app-server stderr to the adapter stderr while stdout stays protocol-only', async () => {
