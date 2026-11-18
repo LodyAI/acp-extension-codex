@@ -3,9 +3,19 @@ import {randomUUID} from "node:crypto";
 import {LODY_SUBAGENT_EVENT_METHOD, isLodySubagentOutput, type LodySubagentEvent, type LodySubagentSnapshot} from "acp-extension-core";
 import type {AcpClientConnection, UpdateSessionEvent} from "../ACPSessionConnection";
 
+export function subagentSnapshotConfiguration(modelId?: string, reasoningEffort?: string | null) {
+    return {...(modelId ? {modelId} : {}), ...(reasoningEffort ? {reasoningEffort} : {})};
+}
+
+type SnapshotConfiguration = ReturnType<typeof subagentSnapshotConfiguration>;
+type RunSnapshot = LodySubagentSnapshot & SnapshotConfiguration;
+type Metadata = Partial<Pick<LodySubagentSnapshot, "name" | "description" | "summary" | "parentToolCallId">> & {
+    configuration?: SnapshotConfiguration;
+};
+
 /** Translates the native child-session transport only after bilateral negotiation. */
 export class LodySubagentEvents {
-    private readonly runs = new Map<string, {id: string; snapshot: LodySubagentSnapshot}>();
+    private readonly runs = new Map<string, {id: string; snapshot: RunSnapshot}>();
     private readonly permissionTools = new Map<string, Set<string>>();
     constructor(private readonly root: string, private readonly connection: AcpClientConnection) {}
 
@@ -13,25 +23,35 @@ export class LodySubagentEvents {
         await this.connection.notify(LODY_SUBAGENT_EVENT_METHOD, event);
     }
 
-    async metadata(sessionId: string, metadata: Partial<Pick<LodySubagentSnapshot, "name" | "description" | "modelId" | "summary" | "parentToolCallId">>): Promise<void> {
+    async metadata(sessionId: string, {configuration, ...metadata}: Metadata): Promise<void> {
         const run = this.runs.get(sessionId);
-        if (!run || !Object.entries(metadata).some(([key, value]) => run.snapshot[key as keyof LodySubagentSnapshot] !== value)) return;
-        run.snapshot = {...run.snapshot, ...metadata};
+        if (!run) return;
+        const {modelId, reasoningEffort, ...withoutConfiguration} = run.snapshot;
+        const changedConfiguration = configuration !== undefined
+            && (configuration.modelId !== modelId || configuration.reasoningEffort !== reasoningEffort);
+        const changedMetadata = Object.entries(metadata).some(([key, value]) => run.snapshot[key as keyof typeof metadata] !== value);
+        if (!changedConfiguration && !changedMetadata) return;
+        const snapshot = changedConfiguration ? {...withoutConfiguration, ...configuration} : run.snapshot;
+        run.snapshot = {...snapshot, ...metadata};
         await this.emit({version: 1, sessionId: this.root, runId: run.id, type: "snapshot", snapshot: run.snapshot});
     }
 
     async update(update: UpdateSessionEvent, sessionId: string): Promise<void> {
         if (update.sessionUpdate === "subagent_spawned") {
             const parent = this.runs.get(sessionId);
+            const meta = update._meta?.['lody'] as Record<string, unknown> | undefined;
             // A missing parent is unknown lineage, never an implicit root edge.
-            const snapshot: LodySubagentSnapshot = {
+            const snapshot: RunSnapshot = {
                 state: "running",
                 ...(sessionId === this.root ? {parentRunId: null} : parent ? {parentRunId: parent.id} : {}),
                 name: update.name,
                 description: update.task,
                 support: {stream: ["text", "thought", "tool", "plan"], progress: false, outputRead: "none", cancel: false},
+                ...subagentSnapshotConfiguration(
+                    typeof meta?.['modelId'] === "string" ? meta['modelId'] : undefined,
+                    typeof meta?.['reasoningEffort'] === "string" ? meta['reasoningEffort'] : undefined,
+                ),
             };
-            const meta = update._meta?.['lody'] as Record<string, unknown> | undefined;
             if (meta?.['initialState'] === 'completed' || meta?.['initialState'] === 'failed' || meta?.['initialState'] === 'cancelled') {
                 snapshot.state = meta['initialState'];
             }
