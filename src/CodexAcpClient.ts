@@ -26,7 +26,6 @@ import type {
     ReasoningEffort,
     ServerNotification
 } from "./app-server";
-import type {ServiceTier} from "./app-server/ServiceTier";
 import type {JsonValue} from "./app-server/serde_json/JsonValue";
 import {ModelId} from "./ModelId";
 import {AgentMode} from "./AgentMode";
@@ -1416,7 +1415,7 @@ export class CodexAcpClient {
         request: acp.PromptRequest,
         agentMode: AgentMode,
         modelId: ModelId,
-        serviceTier: ServiceTier | null,
+        serviceTier: string | null,
         disableSummary: boolean,
         cwd: string,
         additionalDirectories: string[],
