@@ -1,4 +1,4 @@
-import type {ReasoningEffort, ServerNotification} from "../app-server";
+import type {ServerNotification} from "../app-server";
 import type {StateUpdate} from "@agentclientprotocol/sdk/experimental/v2/unstable";
 import type {Thread, ThreadItem, Turn} from "../app-server/v2";
 import {ACPSessionConnection} from "../ACPSessionConnection";
@@ -13,10 +13,11 @@ import {normalizeSessionTitle} from "../SessionTitle";
 import {CollabAgentReporter} from "../tool-calls/reporters/CollabAgentReporter";
 import {SubagentActivityReporter} from "../tool-calls/reporters/SubagentActivityReporter";
 import type {SubagentState} from "./AcpSubagents";
+import type {ClosingChildSession, SubagentModels} from "./CodexSubagentEventRouter";
 import {
-    MODEL_SOURCE_RANK, preferredModel, type ChildModel, type ClosingChildSession, type SubagentModels,
-} from "./CodexSubagentEventRouter";
-import {subagentConfigurationOptions, type ObservedSubagentConfiguration} from "./SubagentConfiguration";
+    CONFIGURATION_SOURCE_RANK, mergeSubagentConfiguration, subagentConfigurationOptions,
+    type ChildConfiguration, type ConfigurationSource, type ObservedSubagentConfiguration,
+} from "./SubagentConfiguration";
 import {isRootAgentPath, nameFromAgentPath, normalizeAgentPath} from "./CodexAgentPath";
 import {PendingNotificationBuffer} from "./PendingNotificationBuffer";
 import {SubagentAssociations, type SubagentAssociation} from "./SubagentAssociations";
@@ -48,10 +49,8 @@ type Pending = {
     description?: string;
     notifications: PendingNotificationBuffer;
 };
-type Configuration = {
-    model?: ChildModel;
-    effort?: {value: ReasoningEffort | null; source: ChildModel["source"]};
-    cwd?: {value: string; source: ChildModel["source"]};
+type Configuration = ChildConfiguration & {
+    cwd?: {value: string; source: ConfigurationSource};
     publishedCwd?: string;
     published?: string;
 };
@@ -385,20 +384,14 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
         return parent === undefined ? null : this.announce(threadId, parent, path);
     }
 
-    private async observeConfiguration(threadId: string, observed: ObservedSubagentConfiguration, source: ChildModel["source"]): Promise<void> {
+    private async observeConfiguration(threadId: string, observed: ObservedSubagentConfiguration, source: ConfigurationSource): Promise<void> {
         const previous = this.configurations.get(threadId);
         const cwd = observed.cwd !== undefined && isAbsoluteProtocolPath(observed.cwd) ? observed.cwd : null;
         if (this.retired || (!previous && !observed.model && observed.effort === null && cwd === null && source !== "settings")) return;
         this.configurationRequests.delete(threadId);
-        const next: Configuration = {...previous};
-        if (observed.model) next.model = preferredModel(previous?.model, {model: observed.model, source});
-        if (cwd !== null && (!previous?.cwd || MODEL_SOURCE_RANK[source] >= MODEL_SOURCE_RANK[previous.cwd.source])) {
+        const next: Configuration = {...previous, ...mergeSubagentConfiguration(previous, observed, source)};
+        if (cwd !== null && (!previous?.cwd || CONFIGURATION_SOURCE_RANK[source] >= CONFIGURATION_SOURCE_RANK[previous.cwd.source])) {
             next.cwd = {value: cwd, source};
-        }
-        const changedModel = next.model?.model !== previous?.model?.model;
-        // A new model cannot retain the old model's effort; null removes an unset or unavailable effort.
-        if (changedModel || !previous?.effort || MODEL_SOURCE_RANK[source] >= MODEL_SOURCE_RANK[previous.effort.source]) {
-            next.effort = {value: observed.effort, source};
         }
         this.configurations.set(threadId, next);
         const child = this.children.get(threadId);

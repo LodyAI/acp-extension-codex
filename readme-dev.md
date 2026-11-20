@@ -3,7 +3,7 @@ Set `CODEX_PATH` to run a different Codex binary; versions other than the one sp
 
 ### Lody subagent event transport
 
-The event contract is supplied by the published Core 0.1.9 dependency.
+The event contract is supplied by `acp-extension-core`.
 
 Clients advertising `_meta.lody.subagentEvents: {version: 1}` receive Core
 `_lody/subagents/event` notifications. Child execution IDs are scoped to the root
@@ -13,9 +13,11 @@ is suppressed for normalized runs. Clients without this capability retain the
 existing native-subagent or ordinary tool-call representation.
 
 A snapshot precedes child output, including when output arrives before the
-activity name. Later activity notifications refresh the name without replacing
-the run. Monitoring timeouts and prompt cleanup report incomplete, unknown
-observation; only native child completion proves success/failure/cancellation.
+activity name. The snapshot carries the model and reasoning effort reported
+for the child by Codex thread and activity events. Later observations can
+update both fields on the same run. Monitoring timeouts and prompt cleanup
+report incomplete, unknown observation. Native child completion establishes
+whether the run succeeded, failed or was cancelled.
 There is no durable run recovery or output replay. This adapter currently advertises
 no run cancellation, output query, or numerical progress support.
 

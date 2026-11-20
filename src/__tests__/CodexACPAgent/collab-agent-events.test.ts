@@ -1,6 +1,7 @@
 import {ToolCallReports} from "../../ToolCallReports";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ServerNotification } from "../../app-server";
+import type { Thread, ThreadItem } from "../../app-server/v2";
 import type { SessionState } from "../../CodexAcpServer";
 import { AgentMode } from "../../AgentMode";
 import {ACPSessionConnection} from "../../ACPSessionConnection";
@@ -26,10 +27,15 @@ describe("normalized Lody subagent events", () => {
         const events = () => sent.map(x => x.params).filter(isLodySubagentEvent);
         return {sent, connection, router, handler, events};
     }
-    function spawn(id = "child", senderThreadId = "root", tool = "spawnAgent"): ServerNotification {
+    function spawn(
+        id = "child",
+        senderThreadId = "root",
+        tool = "spawnAgent",
+        requested?: Pick<Extract<ThreadItem, {type: "collabAgentToolCall"}>, "model" | "reasoningEffort">,
+    ): ServerNotification {
         return {method: "item/started", params: {threadId: senderThreadId, turnId: "parent-turn", startedAtMs: 0,
             item: {type: "collabAgentToolCall", id: `spawn-${id}`, tool, status: "inProgress", senderThreadId,
-                receiverThreadIds: [id], prompt: "Synthetic delegated task", model: null, reasoningEffort: null,
+                receiverThreadIds: [id], prompt: "Synthetic delegated task", model: null, reasoningEffort: null, ...requested,
                 agentsStates: {[id]: {status: "running", message: null}}}}} as ServerNotification;
     }
     function delta(threadId = "child", text = "Investigating"): ServerNotification {
@@ -55,6 +61,31 @@ describe("normalized Lody subagent events", () => {
         expect(events[2]).toMatchObject({snapshot: {parentRunId: events[0]!.runId}});
         expect(events[5]).toMatchObject({runId: events[0]!.runId, snapshot: {state: "completed"}});
         expect(f.sent.filter(x => x.method === "session/update")).toEqual([]);
+    });
+    it("keeps the observed child settings on the run across tool activity and completion", async () => {
+        const f = fixture();
+        await f.handler.handleNotification(spawn("child", "root", "spawnAgent", {model: "requested", reasoningEffort: "low"}));
+        const first = f.events()[0]!;
+        expect(first).toMatchObject({snapshot: {state: "running"}});
+        expect(first).not.toHaveProperty("snapshot.modelId");
+        expect(first).not.toHaveProperty("snapshot.reasoningEffort");
+
+        await f.handler.handleNotification({method: "item/started", params: {threadId: "root", turnId: "parent-turn", startedAtMs: 0,
+            item: {type: "subAgentActivity", id: "activity", kind: "started", agentThreadId: "child",
+                agentPath: "/root/Research", model: "resolved", reasoningEffort: "high"}}});
+        expect(f.events().at(-1)).toMatchObject({runId: first.runId,
+            snapshot: {name: "Research", modelId: "resolved", reasoningEffort: "high"}});
+        await f.handler.handleNotification(delta());
+        await f.handler.handleNotification({method: "thread/settings/updated", params: {threadId: "child",
+            threadSettings: {model: "resolved", effort: "medium"} as never}});
+        expect(f.events().at(-1)).toMatchObject({runId: first.runId,
+            snapshot: {modelId: "resolved", reasoningEffort: "medium"}});
+        await f.handler.handleNotification({method: "thread/settings/updated", params: {threadId: "child",
+            threadSettings: {model: "resolved", effort: null} as never}});
+        await f.handler.handleNotification(finish());
+        expect(f.events().at(-1)).toMatchObject({runId: first.runId,
+            snapshot: {state: "completed", modelId: "resolved"}});
+        expect(f.events().at(-1)).not.toHaveProperty("snapshot.reasoningEffort");
     });
     it("root-routes known child consent and mirrors only its permission tool under a namespaced ID", async () => {
         const f = fixture();
@@ -118,13 +149,17 @@ describe("normalized Lody subagent events", () => {
     });
     it("does not invent a running phase when first discovering a completed execution", async () => {
         const f = fixture();
+        await f.router.handle({method: "thread/started", params: {thread: {
+            id: "child", parentThreadId: "root", model: "resolved", reasoningEffort: "high",
+        } as Thread}});
         const completed = spawn();
         if (completed.method !== 'item/started' || completed.params.item.type !== 'collabAgentToolCall') throw new Error('Invalid fixture');
         completed.params.item.status = 'completed';
         completed.params.item.agentsStates = {child: {status: 'completed', message: null}};
         await f.handler.handleNotification(completed);
         expect(f.events()).toHaveLength(1);
-        expect(f.events()[0]).toMatchObject({type: 'snapshot', snapshot: {state: 'completed'}});
+        expect(f.events()[0]).toMatchObject({type: 'snapshot',
+            snapshot: {state: 'completed', modelId: 'resolved', reasoningEffort: 'high'}});
     });
 });
 import {
