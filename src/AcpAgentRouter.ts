@@ -251,9 +251,10 @@ function createRouter(
         .onRequest(SESSION_UNARCHIVE_METHOD, sessionArchiveParamsParser, (ctx) => getAgent(ctx.params).sessionIndex.setArchived(ctx.params, false))
         .onRequest(SESSION_LIST_SUBSCRIBE_METHOD, sessionListSubscriptionParamsParser, (ctx) => getAgent().sessionIndex.subscribeList(ctx.params))
         .onRequest(SESSION_LIST_UNSUBSCRIBE_METHOD, sessionListSubscriptionParamsParser, (ctx) => getAgent().sessionIndex.unsubscribeList(ctx.params))
+        // App tool calls act on external MCP servers, so subagent sessions refuse them like other mutations.
         .onRequest(MCP_APP_LOAD_METHOD, mcpAppLoadParamsParser, (ctx) => getAgent().mcpAppLoad(ctx.params))
         .onRequest(MCP_APP_RESOURCE_READ_METHOD, mcpAppResourceReadParamsParser, (ctx) => getAgent().mcpAppResourceRead(ctx.params))
-        .onRequest(MCP_APP_TOOL_CALL_METHOD, mcpAppToolCallParamsParser, (ctx) => getAgent().mcpAppToolCall(ctx.params));
+        .onRequest(MCP_APP_TOOL_CALL_METHOD, mcpAppToolCallParamsParser, (ctx) => getAgent(ctx.params).mcpAppToolCall(ctx.params));
 
     const v2Agent = acpV2.agent({name: packageJson.name})
         .onConnect((connection) => attachAgent(createAgent(new AcpV2Connection(connection.client)), connection.signal))
@@ -289,9 +290,10 @@ function createRouter(
         .onRequest(SESSION_BATCH_GET_METHOD, sessionBatchGetParamsParser, (ctx) => getAgent().sessionIndex.batchGet(ctx.params))
         .onRequest(SESSION_LIST_SUBSCRIBE_METHOD, sessionListSubscriptionParamsParser, (ctx) => getAgent().sessionIndex.subscribeList(ctx.params))
         .onRequest(SESSION_LIST_UNSUBSCRIBE_METHOD, sessionListSubscriptionParamsParser, (ctx) => getAgent().sessionIndex.unsubscribeList(ctx.params))
+        // App tool calls act on external MCP servers, so subagent sessions refuse them like other mutations.
         .onRequest(MCP_APP_LOAD_METHOD, mcpAppLoadParamsParser, (ctx) => getAgent().mcpAppLoad(ctx.params))
         .onRequest(MCP_APP_RESOURCE_READ_METHOD, mcpAppResourceReadParamsParser, (ctx) => getAgent().mcpAppResourceRead(ctx.params))
-        .onRequest(MCP_APP_TOOL_CALL_METHOD, mcpAppToolCallParamsParser, (ctx) => getAgent().mcpAppToolCall(ctx.params));
+        .onRequest(MCP_APP_TOOL_CALL_METHOD, mcpAppToolCallParamsParser, (ctx) => getAgent(ctx.params).mcpAppToolCall(ctx.params));
 
     return acpV2.agentProtocolRouter().withV1(v1Agent).withV2(v2Agent);
 }

@@ -391,6 +391,43 @@ describe("MCP Apps", () => {
         });
     });
 
+    it.each(["v1", "v2"] as const)("lets subagent-session views read but not call tools over ACP %s", async (version) => {
+        const childSessionId = "child-session";
+        const received: string[] = [];
+        const mocks = createMockConnections();
+        mocks.mockCodexConnection.sendRequest.mockResolvedValue({});
+        const router = createAcpAgentRouter((connection) => {
+            const agent = new CodexAcpServer(
+                connection,
+                new CodexAcpClient(new CodexAppServerClient(mocks.mockCodexConnection as any)),
+            );
+            vi.spyOn(agent, "assertSessionMutationAllowed").mockImplementation((id: string) => {
+                if (id === childSessionId) {
+                    throw acp.RequestError.invalidRequest(undefined, "Subagent sessions do not permit client-initiated mutations");
+                }
+            });
+            vi.spyOn(agent, "mcpAppLoad").mockImplementation((async () => { received.push("load"); return {}; }) as never);
+            vi.spyOn(agent, "mcpAppResourceRead").mockImplementation((async () => { received.push("read"); return {}; }) as never);
+            vi.spyOn(agent, "mcpAppToolCall").mockImplementation((async () => { received.push("call"); return {}; }) as never);
+            return agent;
+        });
+        const clientToAgent = new TransformStream<Uint8Array, Uint8Array>();
+        const agentToClient = new TransformStream<Uint8Array, Uint8Array>();
+        router.connect(acp.ndJsonStream(agentToClient.writable, clientToAgent.readable));
+        const clientStream = acp.ndJsonStream(clientToAgent.writable, agentToClient.readable);
+        const {request, close} = await connectAndInitialize(version, clientStream);
+        try {
+            await request(MCP_APP_LOAD_METHOD, {sessionId: childSessionId, toolCallId: "c"});
+            await request(MCP_APP_RESOURCE_READ_METHOD, {sessionId: childSessionId, toolCallId: "c", uri: resourceUri});
+            await expect(request(MCP_APP_TOOL_CALL_METHOD, {sessionId: childSessionId, toolCallId: "c", name: "t"}))
+                .rejects.toMatchObject({code: -32600});
+        } finally {
+            close();
+        }
+
+        expect(received).toEqual(["load", "read"]);
+    });
+
     it.each(["v1", "v2"] as const)("routes the three Lody MCP App methods over ACP %s with validated params", async (version) => {
         const received: unknown[] = [];
         const record = async (params: unknown) => {
