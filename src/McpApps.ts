@@ -124,12 +124,15 @@ export class McpAppCalls {
         if (tool === undefined || (Array.isArray(visibility) && !visibility.includes("app"))) {
             throw RequestError.invalidParams(undefined, `Tool ${name} on ${server} is not callable from its MCP App`);
         }
-        return await forwardErrors(() => appServer.mcpServerToolCall({
+        const response = await forwardErrors(() => appServer.mcpServerToolCall({
             threadId: call.threadId,
             server,
             tool: tool.name,
             ...(args !== undefined ? {arguments: args as JsonValue} : {}),
-        })) as LodyMcpAppToolCallResponse;
+        }));
+        const result: LodyMcpAppToolCallResponse = withOptionalFields({content: response.content}, response);
+        if (typeof response.isError === "boolean") result.isError = response.isError;
+        return result;
     }
 
     private async require(appServer: AppServer, sessionId: string, toolCallId: string): Promise<McpAppCall> {
@@ -196,11 +199,22 @@ function appToolNames(server: string, originatingTool: string, name: string): st
 
 function toCallToolResult(result: McpToolCallResult | null, status: McpToolCallStatus): LodyMcpCallToolResult | null {
     if (result === null) return null;
-    const converted: LodyMcpCallToolResult = {content: result.content};
-    if (isRecord(result.structuredContent)) converted.structuredContent = result.structuredContent;
-    if (isRecord(result._meta)) converted._meta = result._meta;
+    const converted = withOptionalFields({content: result.content}, result);
     if (status === "failed") converted.isError = true;
     return converted;
+}
+
+/**
+ * Codex serializes absent optional fields as `null`, which the contract's MCP
+ * `CallToolResult` does not allow, so only object values are carried over.
+ */
+function withOptionalFields(
+    target: LodyMcpCallToolResult,
+    source: {structuredContent?: unknown; _meta?: unknown},
+): LodyMcpCallToolResult {
+    if (isRecord(source.structuredContent)) target.structuredContent = source.structuredContent;
+    if (isRecord(source._meta)) target._meta = source._meta;
+    return target;
 }
 
 /** App-server JSON-RPC failures keep their code and data; the SDK would flatten raw errors. */

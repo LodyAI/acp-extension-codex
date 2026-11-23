@@ -334,6 +334,19 @@ describe("MCP Apps", () => {
         }]);
     });
 
+    it("omits the null optional fields Codex returns for an app tool call", async () => {
+        const content = [{type: "text", text: "expanded"}];
+        const {agent} = createAppServerFixture({
+            "thread/read": () => ({thread: threadWith([completedApp])}),
+            "mcpServerStatus/list": toolServer(["app"]),
+            "mcpServer/tool/call": () => ({content, structuredContent: null, isError: false, _meta: null}),
+        });
+        await openSession(agent);
+
+        const result = await agent.mcpAppToolCall({sessionId, toolCallId: "call-app-1", name: "refresh_graph"});
+        expect(result).toStrictEqual({content, isError: false});
+    });
+
     describe("connector-namespaced codex_apps tools", () => {
         // Codex lists and calls codex_apps tools by the connector-prefixed name, while
         // the app's own HTML knows only its MCP server's bare tool names.
