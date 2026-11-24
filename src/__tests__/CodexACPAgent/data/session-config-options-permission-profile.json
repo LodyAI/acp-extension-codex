@@ -1,0 +1,113 @@
+{
+  "modes": {
+    "availableModes": [
+      {
+        "id": "read-only",
+        "name": "Read-only",
+        "description": "Requires approval to edit files and run commands.",
+        "_meta": {
+          "kind": "standard"
+        }
+      },
+      {
+        "id": "agent",
+        "name": "Agent",
+        "description": "Read and edit files, and run commands.",
+        "_meta": {
+          "kind": "standard"
+        }
+      },
+      {
+        "id": "agent-auto-review",
+        "name": "Agent (auto review)",
+        "description": "Read and edit files, and run commands. Approval requests are reviewed automatically by a Codex subagent.",
+        "_meta": {
+          "kind": "auto_review"
+        }
+      },
+      {
+        "id": "agent-full-access",
+        "name": "Agent (full access)",
+        "description": "Codex can edit files outside this workspace and run commands with network access. Exercise caution when using.",
+        "_meta": {
+          "kind": "full_access"
+        }
+      },
+      {
+        "id": "permission-profile:team-default",
+        "name": "team-default",
+        "description": "Team default permissions"
+      },
+      {
+        "id": "permission-profile:team-fallback",
+        "name": "team-fallback",
+        "description": "Use the team-fallback Codex permission profile."
+      }
+    ],
+    "currentModeId": "permission-profile:team-default"
+  },
+  "modeOption": {
+    "id": "mode",
+    "name": "Mode",
+    "description": "Approval and sandboxing preset for the session",
+    "category": "mode",
+    "type": "select",
+    "currentValue": "permission-profile:team-default",
+    "options": [
+      {
+        "group": "sandbox-modes",
+        "name": "Sandbox Modes",
+        "options": [
+          {
+            "value": "read-only",
+            "name": "Read-only",
+            "description": "Requires approval to edit files and run commands.",
+            "_meta": {
+              "kind": "standard"
+            }
+          },
+          {
+            "value": "agent",
+            "name": "Agent",
+            "description": "Read and edit files, and run commands.",
+            "_meta": {
+              "kind": "standard"
+            }
+          },
+          {
+            "value": "agent-auto-review",
+            "name": "Agent (auto review)",
+            "description": "Read and edit files, and run commands. Approval requests are reviewed automatically by a Codex subagent.",
+            "_meta": {
+              "kind": "auto_review"
+            }
+          },
+          {
+            "value": "agent-full-access",
+            "name": "Agent (full access)",
+            "description": "Codex can edit files outside this workspace and run commands with network access. Exercise caution when using.",
+            "_meta": {
+              "kind": "full_access"
+            }
+          }
+        ]
+      },
+      {
+        "group": "permission-profiles",
+        "name": "Permission Profiles",
+        "options": [
+          {
+            "value": "permission-profile:team-default",
+            "name": "team-default",
+            "description": "Team default permissions"
+          },
+          {
+            "value": "permission-profile:team-fallback",
+            "name": "team-fallback",
+            "description": "Use the team-fallback Codex permission profile."
+          }
+        ]
+      }
+    ]
+  }
+}

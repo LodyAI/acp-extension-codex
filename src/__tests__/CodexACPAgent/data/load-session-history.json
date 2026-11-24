@@ -40,8 +40,8 @@
     {
       "sessionId": "session-1",
       "update": {
-        "sessionUpdate": "session_info_update",
         "title": "Saved title",
+        "sessionUpdate": "session_info_update",
         "_meta": {
           "lody": {
             "titleSource": "explicit"

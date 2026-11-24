@@ -32,8 +32,8 @@
     {
       "sessionId": "session-legacy",
       "update": {
-        "sessionUpdate": "session_info_update",
         "title": "List the files",
+        "sessionUpdate": "session_info_update",
         "_meta": {
           "lody": {
             "titleSource": "fallback"

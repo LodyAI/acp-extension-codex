@@ -1,0 +1,28 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "messageId": "call-question",
+        "content": {
+          "type": "text",
+          "text": "Which environment? See [docs/envs.md](/test/cwd/docs/envs.md)\n- Staging\n- Production"
+        },
+        "_meta": {
+          "lody": {
+            "turnId": "turn-1",
+            "messagePhase": "final_answer"
+          },
+          "jetbrains": {
+            "air": {
+              "version": 1,
+              "phase": "final_answer"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

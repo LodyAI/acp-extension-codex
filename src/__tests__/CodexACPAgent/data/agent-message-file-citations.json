@@ -1,0 +1,112 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "messageId": "final-message",
+        "content": {
+          "type": "text",
+          "text": "The minimum length is 12.\n\n"
+        },
+        "_meta": {
+          "lody": {
+            "turnId": "turn-1"
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "messageId": "final-message",
+        "content": {
+          "type": "text",
+          "text": "[docs/policy.txt](/test/cwd/docs/policy.txt) and "
+        },
+        "_meta": {
+          "lody": {
+            "turnId": "turn-1"
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "messageId": "final-message",
+        "content": {
+          "type": "text",
+          "text": "[/abs/notes.md:4](/abs/notes.md:4)"
+        },
+        "_meta": {
+          "lody": {
+            "turnId": "turn-1"
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "messageId": "final-message",
+        "content": {
+          "type": "text",
+          "text": ". Literal `:codex-file-citation{path=\"x\"}` stays; an unfinished one is sent at the end: "
+        },
+        "_meta": {
+          "lody": {
+            "turnId": "turn-1"
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "messageId": "final-message",
+        "content": {
+          "type": "text",
+          "text": ":codex-fi"
+        },
+        "_meta": {
+          "lody": {
+            "turnId": "turn-1",
+            "messagePhase": "final_answer"
+          },
+          "jetbrains": {
+            "air": {
+              "version": 1,
+              "phase": "final_answer"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

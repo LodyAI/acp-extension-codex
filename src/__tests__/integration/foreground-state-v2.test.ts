@@ -102,11 +102,23 @@ describeIntegration("integration: ACP v2 foreground state", () => {
                 });
                 expect(resumed.availableCommands).toEqual(failedSession.availableCommands);
                 expect(updates.some(({update}) => update.sessionUpdate === "available_commands_update")).toBe(false);
-                expect(updates.filter(({update}) => update.sessionUpdate === "state_update").map(({update}) => update))
-                    .toEqual([{sessionUpdate: "state_update", state: "idle"}]);
+                await vi.waitFor(() => {
+                    expect(updates.filter(({update}) => update.sessionUpdate === "state_update").map(({update}) => update))
+                        .toEqual([{sessionUpdate: "state_update", state: "idle"}]);
+                });
                 const replayedMessages = updates.some(({update}) => update.sessionUpdate === "user_message"
                     || update.sessionUpdate === "user_message_chunk");
                 expect(replayedMessages).toBe(replayFrom != null);
+                const info = updates.filter(({update}) => update.sessionUpdate === "session_info_update" && "title" in update).at(-1);
+                expect(info?.update).toHaveProperty("title");
+                const lastMessage = updates.map(({update}) => update.sessionUpdate).lastIndexOf("agent_message_chunk");
+                expect(updates.indexOf(info!)).toBeGreaterThan(lastMessage);
+                for (const {update} of updates) {
+                    if (update.sessionUpdate === "user_message" || update.sessionUpdate === "agent_message"
+                        || update.sessionUpdate === "agent_thought") {
+                        expect(update._meta).toBeNull();
+                    }
+                }
             }
             updates.splice(0);
             const fork = await connection.agent.request(acpV2.methods.agent.session.fork, {sessionId, cwd});

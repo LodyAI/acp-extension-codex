@@ -1,0 +1,83 @@
+{
+  "currentValue": "permission-profile:team-default",
+  "options": [
+    {
+      "groupId": "sandbox-modes",
+      "name": "Sandbox Modes",
+      "options": [
+        {
+          "value": "read-only",
+          "name": "Read-only",
+          "description": "Requires approval to edit files and run commands.",
+          "_meta": {
+            "kind": "standard",
+            "jetbrains": {
+              "air": {
+                "version": 1,
+                "kind": "standard"
+              }
+            }
+          }
+        },
+        {
+          "value": "agent",
+          "name": "Agent",
+          "description": "Read and edit files, and run commands.",
+          "_meta": {
+            "kind": "standard",
+            "jetbrains": {
+              "air": {
+                "version": 1,
+                "kind": "standard"
+              }
+            }
+          }
+        },
+        {
+          "value": "agent-auto-review",
+          "name": "Agent (auto review)",
+          "description": "Read and edit files, and run commands. Approval requests are reviewed automatically by a Codex subagent.",
+          "_meta": {
+            "kind": "auto_review",
+            "jetbrains": {
+              "air": {
+                "version": 1,
+                "kind": "auto_review"
+              }
+            }
+          }
+        },
+        {
+          "value": "agent-full-access",
+          "name": "Agent (full access)",
+          "description": "Codex can edit files outside this workspace and run commands with network access. Exercise caution when using.",
+          "_meta": {
+            "kind": "full_access",
+            "jetbrains": {
+              "air": {
+                "version": 1,
+                "kind": "full_access"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "groupId": "permission-profiles",
+      "name": "Permission Profiles",
+      "options": [
+        {
+          "value": "permission-profile:team-default",
+          "name": "team-default",
+          "description": "Team default permissions"
+        }
+      ]
+    }
+  ],
+  "type": "select",
+  "configId": "mode",
+  "name": "Mode",
+  "description": "Approval and sandboxing preset for the session",
+  "category": "mode"
+}

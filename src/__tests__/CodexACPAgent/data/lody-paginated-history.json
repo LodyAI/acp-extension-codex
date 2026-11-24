@@ -4,8 +4,8 @@
     {
       "sessionId": "session-1",
       "update": {
-        "sessionUpdate": "session_info_update",
         "title": "Imported conversation",
+        "sessionUpdate": "session_info_update",
         "_meta": {
           "lody": {
             "titleSource": "explicit"

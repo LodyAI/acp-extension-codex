@@ -13,6 +13,9 @@ describe("goal control transport", () => {
                 createAgent() {
                     connectionInstalled = true;
                     return {
+                        async initialize() {
+                            return {protocolVersion: 1, agentCapabilities: {}, authMethods: []};
+                        },
                         async extMethod(receivedMethod: string, params: Record<string, unknown>) {
                             return {receivedMethod, params};
                         },
@@ -20,13 +23,14 @@ describe("goal control transport", () => {
                 },
             });
 
-            const response = await acp.client({name: "goal-control-client"}).connectWith(app, (connection) =>
-                connection.request(method, {
+            const response = await acp.client({name: "goal-control-client"}).connectWith(app, async (connection) => {
+                await connection.request(acp.methods.agent.initialize, {protocolVersion: 1, clientCapabilities: {}});
+                return connection.request(method, {
                     sessionId: "session-1",
                     action: "set",
                     objective: "Ship the sync",
-                })
-            );
+                });
+            });
 
             expect(connectionInstalled).toBe(true);
             expect(response).toEqual({

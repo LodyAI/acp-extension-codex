@@ -4,6 +4,7 @@
     "update": {
       "messageId": "reviewer-reasoning",
       "content": [],
+      "_meta": null,
       "sessionUpdate": "agent_thought"
     }
   },
@@ -23,6 +24,7 @@
     "update": {
       "messageId": "review-entered",
       "content": [],
+      "_meta": null,
       "sessionUpdate": "agent_message"
     }
   },
@@ -42,6 +44,7 @@
     "update": {
       "messageId": "review-exited",
       "content": [],
+      "_meta": null,
       "sessionUpdate": "agent_message"
     }
   },
@@ -61,6 +64,7 @@
     "update": {
       "messageId": "review-summary",
       "content": [],
+      "_meta": null,
       "sessionUpdate": "agent_message"
     }
   },
@@ -96,6 +100,7 @@
     "update": {
       "messageId": "ordinary-reply",
       "content": [],
+      "_meta": null,
       "sessionUpdate": "agent_message"
     }
   },
@@ -120,6 +125,7 @@
     "update": {
       "messageId": "review2-entered",
       "content": [],
+      "_meta": null,
       "sessionUpdate": "agent_message"
     }
   },
@@ -139,6 +145,7 @@
     "update": {
       "messageId": "review2-exited",
       "content": [],
+      "_meta": null,
       "sessionUpdate": "agent_message"
     }
   },
@@ -158,6 +165,7 @@
     "update": {
       "messageId": "review2-summary",
       "content": [],
+      "_meta": null,
       "sessionUpdate": "agent_message"
     }
   },

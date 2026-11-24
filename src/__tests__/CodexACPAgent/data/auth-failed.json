@@ -8,6 +8,7 @@
 {
   "eventType": "response",
   "account": null,
+  "userId": null,
   "requiresOpenaiAuth": true,
   "workspaceRouting": null
 }

@@ -7,7 +7,6 @@ import {RequestError} from "@agentclientprotocol/sdk/unstable";
 import type {SessionConfig} from "./CodexAcpClient";
 import type {CodexAppServerClient} from "./CodexAppServerClient";
 import type {ModeKind} from "./app-server/ModeKind";
-import type {ServiceTier} from "./app-server/ServiceTier";
 import type {Model} from "./app-server/v2";
 import type {SessionMetadata} from "./SessionMetadata";
 import {getLodyForkTurnId} from "./AcpExtensions";
@@ -41,7 +40,7 @@ export async function forkSession(
 ): Promise<SessionMetadata> {
     const project = readWorktreeProject(request._meta);
     const lastTurnId = await resolveForkTurnId(request, dependencies.codexClient);
-    const sessionConfig = await dependencies.createSessionConfig(
+    const {config, skippedMcpServers, defaultPermissionProfileId: _defaultPermissionProfileId, ...permissionProfileMetadata} = await dependencies.createSessionConfig(
         request.cwd,
         additionalDirectories,
         request.mcpServers ?? [],
@@ -49,7 +48,7 @@ export async function forkSession(
     );
     const response = await dependencies.codexClient.threadFork({
         excludeTurns: true,
-        config: sessionConfig.config,
+        config,
         cwd: request.cwd,
         ...(lastTurnId !== undefined && {lastTurnId}),
         modelProvider: await dependencies.getResumeModelProvider(),
@@ -75,9 +74,11 @@ export async function forkSession(
         models,
         collaborationMode: dependencies.getCollaborationMode(response.thread.id),
         modelProvider: response.modelProvider,
-        currentServiceTier: response.serviceTier as ServiceTier ?? null,
+        currentServiceTier: response.serviceTier ?? null,
         additionalDirectories,
-        skippedMcpServers: sessionConfig.skippedMcpServers,
+        skippedMcpServers,
+        activePermissionProfileId: response.activePermissionProfile?.id ?? null,
+        ...permissionProfileMetadata,
         ...(instructions ? {instructions} : {}),
     };
 }

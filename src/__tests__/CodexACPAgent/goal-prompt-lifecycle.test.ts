@@ -106,7 +106,7 @@ describe("Goal continuation through ACP v1 prompt", () => {
         await expect(run.response).resolves.toMatchObject({stopReason: "cancelled"});
         expect(run.fixture.getAcpConnectionEvents([])).toContainEqual(expect.objectContaining({
             args: [expect.objectContaining({update: expect.objectContaining({
-                _meta: {lody: {goal: expect.objectContaining({status: "paused"})}},
+                _meta: expect.objectContaining({lody: {goal: expect.objectContaining({status: "paused"})}}),
             })})],
         }));
     });

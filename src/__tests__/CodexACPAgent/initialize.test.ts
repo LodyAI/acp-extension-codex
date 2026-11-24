@@ -55,6 +55,7 @@ describe('CodexACPAgent - initialize', () => {
                     list: {},
                     close: {},
                     delete: {},
+                    title: {},
                     additionalDirectories: {},
                     subagents: {},
                     systemPrompt: {},

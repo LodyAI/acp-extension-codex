@@ -14,6 +14,7 @@ import type {
 import {type Error as AcpError, type PlanEntry, RequestError} from "@agentclientprotocol/sdk/unstable";
 import {ACPSessionConnection, type AcpClientConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
 import {
+    withLodyMetadata,
     ACP_EXT_SESSION_RATE_LIMITS_METHOD,
     ACP_EXT_SESSION_USAGE_UPDATE_METHOD,
     type SessionRateLimitsExtNotification,
@@ -83,24 +84,28 @@ import {commandUsesTerminal} from "./tool-calls/reporters/CommandReporter";
 import {CompactionReporter} from "./tool-calls/reporters/CompactionReporter";
 import {DynamicToolReporter} from "./tool-calls/reporters/DynamicToolReporter";
 import {FileChangeReporter} from "./tool-calls/reporters/FileChangeReporter";
+import {FileCitationStream, renderFileCitations} from "./CodexFileCitations";
 import {CodexItemStreamState} from "./CodexItemStreamState";
 import {PLAIN_TOOL_CALL_ITEM_TYPES} from "./CodexSessionToolCalls";
 import {ImageGenerationReporter} from "./tool-calls/reporters/ImageGenerationReporter";
 import {ImageViewReporter} from "./tool-calls/reporters/ImageViewReporter";
 import {McpToolReporter} from "./tool-calls/reporters/McpToolReporter";
 import {WebSearchReporter} from "./tool-calls/reporters/WebSearchReporter";
-import {CodexPlanStream} from "./CodexPlanStream";
+import {CodexPlanStream, structuredPlanUpdate} from "./CodexPlanStream";
+import {isWorkspaceRoutingUnavailableMessage} from "./CodexThreadErrors";
 import {
     createMessagePhaseMeta,
 } from "./ContentChunks";
 import {goalSessionInfoUpdate} from "./ThreadGoalSnapshot";
 import {logger} from "./Logger";
+import {recordOrNull} from "./permissions/json";
 import {
     AIR_EXTENSION_VERSION,
     AIR_EXTENSION_VERSION_KEY,
     AIR_META_KEY,
     AIR_SESSION_FAILURE_KEY,
     JETBRAINS_META_KEY,
+    withAirMetadata,
 } from "./AirExtension";
 import type {SubagentEventRouter} from "./subagents/SubagentEventRouter";
 import {StandardSubagentEventRouter} from "./subagents/StandardSubagentEventRouter";
@@ -382,18 +387,18 @@ export class CodexEventHandler {
         };
         await this.finishCompactionsForNotification({method: "error", params: sanitizedParams});
         if (sanitizedParams.willRetry) {
-            await this.session.update(this.createSessionFailureUpdate(this.recordRetryWarning(sanitizedParams, false)));
+            await this.publishUpdate(this.createSessionFailureUpdate(this.recordRetryWarning(sanitizedParams, false)));
             return;
         }
         const failure = this.recordSessionFailure(
-            this.sessionFailureKind(sanitizedParams.error.codexErrorInfo),
+            this.sessionFailureKind(sanitizedParams.error),
             sanitizedParams.turnId,
             "error",
             sanitizedParams.error.message,
             undefined,
             false,
         );
-        await this.session.update(this.createSessionFailureUpdate(failure));
+        await this.publishUpdate(this.createSessionFailureUpdate(failure));
     }
 
     async flushPendingErrors(): Promise<void> {
@@ -404,7 +409,7 @@ export class CodexEventHandler {
         for (const error of errors) {
             const update = await this.createErrorEvent(error);
             if (update) {
-                await this.session.update(update);
+                await this.publishUpdate(update);
             }
         }
     }
@@ -420,7 +425,17 @@ export class CodexEventHandler {
     }
 
     async clearSessionFailure(): Promise<void> {
+        const failure = this.sessionState.sessionFailure;
         delete this.sessionState.sessionFailure;
+        if (!failure || this.session.protocolVersion !== 2) return;
+        await this.session.patchSessionMetadata(metadata => {
+            const jetbrains = recordOrNull(metadata[JETBRAINS_META_KEY]);
+            const air = recordOrNull(jetbrains?.[AIR_META_KEY]);
+            const published = recordOrNull(air?.[AIR_SESSION_FAILURE_KEY]);
+            if (!air || published?.["id"] !== failure.id || published?.["revision"] !== failure.revision) return null;
+            const {[AIR_SESSION_FAILURE_KEY]: _failure, ...currentAir} = air;
+            return {[JETBRAINS_META_KEY]: {...jetbrains, [AIR_META_KEY]: currentAir}};
+        });
     }
 
     async completeSuccessfulTurn(turnId: string | null): Promise<void> {
@@ -429,7 +444,7 @@ export class CodexEventHandler {
         const active = this.sessionState.sessionFailure;
         if (active?.id !== this.activeFailureIdByScope.get(turnId) || active?.severity !== "warning") return;
         this.activeFailureIdByScope.delete(turnId);
-        delete this.sessionState.sessionFailure;
+        await this.clearSessionFailure();
     }
 
     async handleFailedTurn(turn: Turn): Promise<void> {
@@ -531,7 +546,7 @@ export class CodexEventHandler {
         }
         if (updateEvent === undefined) updateEvent = await this.createUpdateEvent(notification);
         if (updateEvent) {
-            await this.session.update(updateEvent, this.subagents.notificationSessionId(notification));
+            await this.publishUpdate(updateEvent, this.subagents.notificationSessionId(notification));
         }
         await this.emitExtNotification(notification);
     }
@@ -883,7 +898,29 @@ export class CodexEventHandler {
         };
     }
 
+    /** These fact builders produce partial owned namespaces, unlike raw metadata patches. */
+    private publishUpdate(update: UpdateSessionEvent, sessionId = this.sessionState.sessionId): Promise<void> {
+        if (this.session.protocolVersion !== 2 || update.sessionUpdate !== "session_info_update" || update._meta == null) {
+            return this.session.update(update, sessionId);
+        }
+        const {_meta, sessionUpdate: _tag, ...fields} = update;
+        return this.session.forSession(sessionId).patchSessionMetadata(current => {
+            const metadata = {..._meta};
+            const lody = recordOrNull(_meta["lody"]);
+            if (lody) Object.assign(metadata, withLodyMetadata(current, lody));
+            const codex = recordOrNull(_meta["codex"]);
+            if (codex) metadata["codex"] = {...recordOrNull(current["codex"]), ...codex};
+            const air = recordOrNull(recordOrNull(_meta[JETBRAINS_META_KEY])?.[AIR_META_KEY]);
+            if (air) metadata[JETBRAINS_META_KEY] = withAirMetadata(current, air)[JETBRAINS_META_KEY];
+            return metadata;
+        }, fields);
+    }
+
     private createCodexSessionInfoUpdate(codexMetadata: Record<string, unknown>): UpdateSessionEvent {
+        const error = recordOrNull(codexMetadata["error"]);
+        if (error && typeof error["message"] === "string") {
+            codexMetadata = {...codexMetadata, error: {...error, message: readableServiceErrorMessage(error["message"])}};
+        }
         return {
             sessionUpdate: "session_info_update",
             _meta: {
@@ -892,13 +929,33 @@ export class CodexEventHandler {
         };
     }
 
-    private async createTextEvent(event: AgentMessageDeltaNotification): Promise<UpdateSessionEvent> {
-        const phase = this.streamsFor(event.threadId).agentMessagePhases.get(event.itemId) ?? null;
-        return createAgentTextMessageChunk(
-            event.delta,
-            event.itemId,
-            {...createMessagePhaseMeta(phase, this.sessionState.clientCapabilities.airClient), ...createCodexAgentMessageMeta(phase, event.turnId)},
-        );
+    private async createTextEvent(event: AgentMessageDeltaNotification): Promise<UpdateSessionEvent | null> {
+        const streams = this.streamsFor(event.threadId);
+        let citations = streams.agentMessageCitations.get(event.itemId);
+        if (citations === undefined) {
+            citations = new FileCitationStream(this.sessionState.cwd);
+            streams.agentMessageCitations.set(event.itemId, citations);
+        }
+        return this.createAgentMessageText(citations.push(event.delta), event.itemId, event.threadId, event.turnId);
+    }
+
+    /**
+     * Sends the text a file citation held back, once the message is complete. A message that
+     * arrives whole, without deltas (an async question, for one), is sent in full.
+     */
+    private flushAgentMessageText(item: ThreadItem & { type: "agentMessage" }, threadId: string, turnId: string): UpdateSessionEvent | null {
+        const streams = this.streamsFor(threadId);
+        const citations = streams.agentMessageCitations.get(item.id);
+        streams.agentMessageCitations.delete(item.id);
+        const text = citations ? citations.flush() : renderFileCitations(item.text, this.sessionState.cwd);
+        return this.createAgentMessageText(text, item.id, threadId, turnId);
+    }
+
+    private createAgentMessageText(text: string, itemId: string, threadId: string, turnId: string): UpdateSessionEvent | null {
+        if (text.length === 0) return null;
+        const phase = this.streamsFor(threadId).agentMessagePhases.get(itemId) ?? null;
+        const meta = {...createMessagePhaseMeta(phase, this.sessionState.clientCapabilities.airClient), ...createCodexAgentMessageMeta(phase, turnId)};
+        return createAgentTextMessageChunk(text, itemId, meta);
     }
 
     private async createConfigWarningEvent(event: ConfigWarningNotification): Promise<UpdateSessionEvent> {
@@ -1089,7 +1146,7 @@ export class CodexEventHandler {
                 return this.renderer.render(this.subagents.legacyCollaborationCompleted(event.item));
             case "agentMessage":
                 this.rememberAgentMessagePhase(event.item, event.threadId);
-                return null;
+                return this.flushAgentMessageText(event.item, event.threadId, event.turnId);
             case "plan":
                 return await this.createCompletedPlanEvent(event.item);
             case "exitedReviewMode":
@@ -1174,10 +1231,7 @@ export class CodexEventHandler {
                 priority: "medium"
             })
         );
-        return {
-            sessionUpdate: "plan",
-            entries: plan,
-        }
+        return structuredPlanUpdate(plan, this.sessionState.clientCapabilities);
     }
 
     private async createErrorEvent(params: ErrorNotification): Promise<UpdateSessionEvent | null> {
@@ -1198,7 +1252,7 @@ export class CodexEventHandler {
                 const failure = params.willRetry
                     ? this.recordRetryWarning(sanitizedParams)
                     : this.recordSessionFailure(
-                        this.sessionFailureKind(sanitizedError.codexErrorInfo),
+                        this.sessionFailureKind(sanitizedError),
                         params.turnId,
                         "error",
                         sanitizedError.message,
@@ -1265,7 +1319,7 @@ export class CodexEventHandler {
     private sanitizeTurnError(error: ErrorNotification["error"]): ErrorNotification["error"] {
         return {
             ...error,
-            message: sanitizeProviderErrorText(readableServiceErrorMessage(error.message)),
+            message: sanitizeProviderErrorText(error.message),
             additionalDetails: error.additionalDetails === null
                 ? null
                 : sanitizeProviderErrorText(error.additionalDetails),
@@ -1273,7 +1327,7 @@ export class CodexEventHandler {
     }
 
     private recordTypedSessionFailure(params: ErrorNotification): void {
-        const kind = this.sessionFailureKind(params.error.codexErrorInfo);
+        const kind = this.sessionFailureKind(params.error);
         this.recordSessionFailure(kind, params.turnId, "error", params.error.message);
     }
 
@@ -1329,12 +1383,12 @@ export class CodexEventHandler {
         if (activeId === undefined || this.failuresById.get(activeId)?.severity !== "warning") return;
         this.activeFailureIdByScope.delete(turnId);
         if (this.sessionState.sessionFailure?.id === activeId) {
-            delete this.sessionState.sessionFailure;
+            void this.clearSessionFailure().catch(error => logger.error("Failed to clear session failure metadata", error));
         }
     }
 
     private recordRetryWarning(params: ErrorNotification, attributeToTurn = true): SessionFailure {
-        const kind = this.sessionFailureKind(params.error.codexErrorInfo);
+        const kind = this.sessionFailureKind(params.error);
         return this.recordSessionFailure(
             kind,
             params.turnId,
@@ -1395,8 +1449,9 @@ export class CodexEventHandler {
         };
     }
 
-    private sessionFailureKind(error: CodexErrorInfo | null): CodexFailureKind {
+    private sessionFailureKind({message, codexErrorInfo: error}: ErrorNotification["error"]): CodexFailureKind {
         if (this.isAuthenticationRequiredError(error)) return "auth_required";
+        if (isWorkspaceRoutingUnavailableMessage(message)) return "transport_lost";
         if (this.getHttpStatusCode(error) === 429) return "rate_limited";
         if (typeof error === "string") {
             return Object.hasOwn(STRING_CODEX_ERROR_CATEGORIES, error)
@@ -1434,7 +1489,7 @@ export class CodexEventHandler {
             codexErrorInfo?: CodexErrorInfo;
             additionalDetails?: string;
         } = {
-            message: error.additionalDetails ?? error.message,
+            message: error.additionalDetails ?? readableServiceErrorMessage(error.message),
         };
         if (error.codexErrorInfo !== null) {
             data.codexErrorInfo = error.codexErrorInfo;

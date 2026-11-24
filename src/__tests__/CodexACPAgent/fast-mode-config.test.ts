@@ -9,8 +9,10 @@ import {
 import {
     createFastModeConfigOption,
     FAST_MODE_CONFIG_ID,
+    FAST_MODE_FAST,
     FAST_MODE_OFF,
     FAST_MODE_ON,
+    FAST_MODE_ULTRAFAST,
 } from "../../FastModeConfig";
 import {MODEL_CONFIG_ID} from "../../ModelConfigOption";
 
@@ -24,7 +26,7 @@ describe("Fast mode session config", () => {
     };
 
     async function createSession(
-        currentServiceTier: "fast" | "flex" | null = null,
+        currentServiceTier: string | null = null,
         clientInfo: acp.Implementation | null = null,
         clientCapabilities?: acp.ClientCapabilities,
     ) {
@@ -99,15 +101,27 @@ describe("Fast mode session config", () => {
         expect(response.configOptions).toContainEqual(createFastModeConfigOption(false));
     });
 
-    it("initializes Fast mode as On when the app-server session tier is fast", async () => {
-        const {response, codexAcpAgent} = await createSession("fast");
+    it.each([
+        {serviceTier: "fast", enabled: true},
+        {serviceTier: "priority", enabled: true},
+        {serviceTier: "flex", enabled: false},
+        {serviceTier: null, enabled: false},
+        {serviceTier: "unknown", enabled: false},
+    ])("preserves Fast mode from the app-server tier $serviceTier through the first prompt", async ({serviceTier, enabled}) => {
+        const {fixture, response, codexAcpAgent} = await createSession(serviceTier);
+        const turnStartSpy = mockPromptTurn(fixture, "session-id");
 
-        expect(response.configOptions).toContainEqual(createFastModeConfigOption(true));
-        expect(codexAcpAgent.getSessionState("session-id").fastModeEnabled).toBe(true);
+        expect(response.configOptions).toContainEqual(createFastModeConfigOption(enabled));
+
+        await codexAcpAgent.prompt({sessionId: "session-id", prompt: [{type: "text", text: "test"}]});
+
+        expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({
+            serviceTier: enabled ? "fast" : null,
+        }));
     });
 
     it("omits Fast mode config options for JetBrains 2026.1 IntelliJ clients", async () => {
-        const {response} = await createSession(null, {
+        const {response, fixture, codexAcpAgent} = await createSession(null, {
             name: "JetBrains.WebStorm",
             version: "2026.1.1",
             title: "WebStorm 2026.1.1",
@@ -117,6 +131,9 @@ describe("Fast mode session config", () => {
         });
 
         expect(response.configOptions).toBeUndefined();
+        await codexAcpAgent.setSessionConfigOption({sessionId: response.sessionId, configId: FAST_MODE_CONFIG_ID, value: FAST_MODE_ON});
+        expect(fixture.getAcpConnectionEvents([]).some(event =>
+            event.method === "sessionUpdate" && event.args[0]?.update?.sessionUpdate === "config_option_update")).toBe(false);
     });
 
     it("omits Fast mode config options for JetBrains 2026.1 clients by name", async () => {
@@ -282,5 +299,192 @@ describe("Fast mode session config", () => {
             model: "slow-model",
             serviceTier: null,
         }));
+    });
+
+    describe("Ultrafast speed tier select", () => {
+        async function createMultiTierSession(
+            currentServiceTier: string | null = null,
+            clientCapabilities: acp.ClientCapabilities = booleanConfigCapabilities,
+        ) {
+            const fixture = createCodexMockTestFixture();
+            const codexAcpAgent = fixture.getCodexAcpAgent();
+            const codexAcpClient = fixture.getCodexAcpClient();
+            const ultrafastModel = createTestModel({
+                id: "gpt-6.2-sol",
+                additionalSpeedTiers: ["fast", "ultrafast"],
+                serviceTiers: [
+                    {id: "priority", name: "Fast", description: "2x speed, increased usage"},
+                    {id: "ultrafast", name: "Ultrafast", description: "The fastest available responses for latency-sensitive work."},
+                ],
+            });
+            const fastOnlyModel = createTestModel({
+                id: "gpt-6.2-astra",
+                additionalSpeedTiers: ["fast"],
+                serviceTiers: [
+                    {id: "priority", name: "Fast", description: "2x speed, increased usage"},
+                ],
+            });
+            const slowModel = createTestModel({id: "slow-model"});
+
+            vi.spyOn(codexAcpClient, "readAuthRequirement").mockResolvedValue({required: false, account: null});
+            vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
+            vi.spyOn(codexAcpClient, "newSession").mockResolvedValue({
+                sessionId: "session-id",
+                currentModelId: "gpt-6.2-sol[medium]",
+                models: [ultrafastModel, fastOnlyModel, slowModel],
+                collaborationMode: "default",
+                currentServiceTier,
+                additionalDirectories: [],
+            });
+
+            await codexAcpAgent.initialize({
+                protocolVersion: acp.PROTOCOL_VERSION,
+                clientCapabilities,
+            });
+
+            const response = await codexAcpAgent.newSession({cwd: "/test/cwd", mcpServers: []});
+            return {fixture, codexAcpAgent, response};
+        }
+
+        it("exposes a Standard/Fast/Ultrafast select and declares per-model speedTiers", async () => {
+            const {response} = await createMultiTierSession();
+
+            const speedOption = response.configOptions?.find(option => option.id === FAST_MODE_CONFIG_ID);
+            expect(speedOption).toEqual({
+                id: FAST_MODE_CONFIG_ID,
+                name: "Speed",
+                description: "Response speed tier for the session",
+                category: "model_config",
+                type: "select",
+                currentValue: FAST_MODE_OFF,
+                options: [
+                    {value: FAST_MODE_OFF, name: "Standard", description: "Default speed, normal usage"},
+                    {value: FAST_MODE_FAST, name: "Fast", description: "2x speed, increased usage"},
+                    {
+                        value: FAST_MODE_ULTRAFAST,
+                        name: "Ultrafast",
+                        description: "The fastest available responses for latency-sensitive work.",
+                    },
+                ],
+            });
+
+            const lodyMeta = (response._meta as Record<string, unknown> | undefined)?.["lody"] as
+                | { modelCapabilities?: { models?: Record<string, unknown> } }
+                | undefined;
+            expect(lodyMeta?.modelCapabilities?.models).toEqual({
+                "gpt-6.2-sol": {effortValues: ["medium"], fastMode: true, speedTiers: ["fast", "ultrafast"]},
+                "gpt-6.2-astra": {effortValues: ["medium"], fastMode: true},
+                "slow-model": {effortValues: ["medium"], fastMode: false},
+            });
+        });
+
+        it.each([
+            {tier: FAST_MODE_ULTRAFAST, expectedServiceTier: "ultrafast"},
+            {tier: FAST_MODE_FAST, expectedServiceTier: "fast"},
+            {tier: FAST_MODE_OFF, expectedServiceTier: null},
+        ])("applies $tier via v1 and v2 config options and forwards serviceTier=$expectedServiceTier", async ({tier, expectedServiceTier}) => {
+            const {fixture, codexAcpAgent} = await createMultiTierSession();
+            const turnStartSpy = mockPromptTurn(fixture, "session-id");
+
+            const v2Response = await codexAcpAgent.setSessionConfigOptionV2({
+                sessionId: "session-id",
+                configId: FAST_MODE_CONFIG_ID,
+                type: "id",
+                value: tier,
+            });
+            const v2Option = v2Response.configOptions.find(option => option.configId === FAST_MODE_CONFIG_ID);
+            expect(v2Option).toMatchObject({type: "select", currentValue: tier});
+
+            await codexAcpAgent.prompt({sessionId: "session-id", prompt: [{type: "text", text: "test"}]});
+            expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({
+                serviceTier: expectedServiceTier,
+            }));
+        });
+
+        it("accepts legacy boolean and on/off values on a multi-tier model", async () => {
+            const {fixture, codexAcpAgent} = await createMultiTierSession();
+            const turnStartSpy = mockPromptTurn(fixture, "session-id");
+
+            const boolOn = await codexAcpAgent.setSessionConfigOption({
+                sessionId: "session-id",
+                configId: FAST_MODE_CONFIG_ID,
+                type: "boolean",
+                value: true,
+            });
+            expect(boolOn.configOptions.find(o => o.id === FAST_MODE_CONFIG_ID)).toMatchObject({
+                type: "select",
+                currentValue: FAST_MODE_FAST,
+            });
+
+            await codexAcpAgent.prompt({sessionId: "session-id", prompt: [{type: "text", text: "test"}]});
+            expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({serviceTier: "fast"}));
+
+            const boolOff = await codexAcpAgent.setSessionConfigOption({
+                sessionId: "session-id",
+                configId: FAST_MODE_CONFIG_ID,
+                type: "boolean",
+                value: false,
+            });
+            expect(boolOff.configOptions.find(o => o.id === FAST_MODE_CONFIG_ID)).toMatchObject({
+                type: "select",
+                currentValue: FAST_MODE_OFF,
+            });
+        });
+
+        it("preserves initial ultrafast tier and does not send ultrafast after switching to a fast-only or non-fast model", async () => {
+            const {fixture, codexAcpAgent, response} = await createMultiTierSession("ultrafast");
+            const turnStartSpy = mockPromptTurn(fixture, "session-id");
+
+            expect(response.configOptions?.find(o => o.id === FAST_MODE_CONFIG_ID)).toMatchObject({
+                type: "select",
+                currentValue: FAST_MODE_ULTRAFAST,
+            });
+
+            // Switch to Fast-only model: reverts to boolean toggle (off), never submits ultrafast.
+            const fastOnlyResponse = await codexAcpAgent.setSessionConfigOption({
+                sessionId: "session-id",
+                configId: MODEL_CONFIG_ID,
+                value: "gpt-6.2-astra",
+            });
+            expect(fastOnlyResponse.configOptions.find(o => o.id === FAST_MODE_CONFIG_ID)).toEqual(
+                createFastModeConfigOption(false, true),
+            );
+            await codexAcpAgent.prompt({sessionId: "session-id", prompt: [{type: "text", text: "test"}]});
+            expect(turnStartSpy).toHaveBeenLastCalledWith(expect.objectContaining({
+                model: "gpt-6.2-astra",
+                serviceTier: null,
+            }));
+
+            // Rejects ultrafast while on a Fast-only model.
+            await expect(codexAcpAgent.setSessionConfigOption({
+                sessionId: "session-id",
+                configId: FAST_MODE_CONFIG_ID,
+                value: FAST_MODE_ULTRAFAST,
+            })).rejects.toThrow();
+
+            // Switching to non-fast model removes the speed option and sends null.
+            const slowResponse = await codexAcpAgent.setSessionConfigOption({
+                sessionId: "session-id",
+                configId: MODEL_CONFIG_ID,
+                value: "slow-model",
+            });
+            expect(slowResponse.configOptions.some(o => o.id === FAST_MODE_CONFIG_ID)).toBe(false);
+            await codexAcpAgent.prompt({sessionId: "session-id", prompt: [{type: "text", text: "test"}]});
+            expect(turnStartSpy).toHaveBeenLastCalledWith(expect.objectContaining({
+                model: "slow-model",
+                serviceTier: null,
+            }));
+
+            // Switching back to the multi-tier model restores ultrafast.
+            const backResponse = await codexAcpAgent.setSessionConfigOption({
+                sessionId: "session-id",
+                configId: MODEL_CONFIG_ID,
+                value: "gpt-6.2-sol",
+            });
+            expect(backResponse.configOptions.find(o => o.id === FAST_MODE_CONFIG_ID)).toMatchObject({
+                type: "select",
+                currentValue: FAST_MODE_ULTRAFAST,
+            });
+        });
     });
 });
