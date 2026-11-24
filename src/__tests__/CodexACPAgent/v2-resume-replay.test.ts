@@ -95,6 +95,7 @@ const reviewReplayTurns: Thread["turns"] = [
             {type: "enteredReviewMode", id: "review-entered", review: "Review the diff"},
             {type: "exitedReviewMode", id: "review-exited", review: "Looks good"},
             {
+                moderation: null,
                 type: "agentMessage",
                 id: "review-summary",
                 text: "Review complete.",
@@ -122,6 +123,7 @@ const reviewReplayTurns: Thread["turns"] = [
                 content: [{type: "text", text: "Reply with just OK.", text_elements: []}],
             },
             {
+                moderation: null,
                 type: "agentMessage",
                 id: "ordinary-reply",
                 text: "OK",
@@ -145,6 +147,7 @@ const reviewReplayTurns: Thread["turns"] = [
             {type: "enteredReviewMode", id: "review2-entered", review: "Second review"},
             {type: "exitedReviewMode", id: "review2-exited", review: "All good"},
             {
+                moderation: null,
                 type: "agentMessage",
                 id: "review2-summary",
                 text: "Second review complete.",
@@ -225,7 +228,7 @@ async function connectV2Client(options?: {
     const codexAcpClient = new CodexAcpClient(new CodexAppServerClient(mocks.mockCodexConnection as any));
     vi.spyOn(codexAcpClient, "readAuthRequirement").mockResolvedValue({required: false, account: null});
     vi.spyOn(codexAcpClient, "getAgentConfiguredModelProvider").mockResolvedValue("openai");
-    vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
+    vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({userId: null, account: null, requiresOpenaiAuth: false});
     vi.spyOn(codexAcpClient, "awaitMcpServerStartup").mockResolvedValue({ready: [], failed: [], cancelled: []});
     const router = createAcpAgentRouter((connection) => new CodexAcpServer(connection, codexAcpClient));
     const clientToAgent = new TransformStream<Uint8Array, Uint8Array>();
@@ -334,7 +337,7 @@ describe('ACP v2 resume replay: review-mode ids, reviewer-prompt hiding, primers
             itemsView: "full",
             items: [
                 {...commandExecutionItem("command", "completed"), aggregatedOutput: "Recorded output"},
-                {type: "mcpToolCall", id: "mcp", server: "docs", tool: "lookup", status: "completed",
+                {environmentId: null, type: "mcpToolCall", id: "mcp", server: "docs", tool: "lookup", status: "completed",
                     arguments: {}, appContext: null, mcpAppUi: null, pluginId: null, readOnlyHint: null,
                     result: null, error: null, durationMs: null},
                 {type: "contextCompaction", id: "compaction"},
@@ -389,7 +392,7 @@ describe('ACP v2 resume replay: review-mode ids, reviewer-prompt hiding, primers
         const codexAcpClient = fixture.getCodexAcpClient();
         const appServer = fixture.getCodexAppServerClient();
         codexAcpClient.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
-        codexAcpClient.getAccount = vi.fn().mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        codexAcpClient.getAccount = vi.fn().mockResolvedValue({userId: null, account: null, requiresOpenaiAuth: false});
         codexAcpClient.listSkills = vi.fn().mockResolvedValue({data: []});
         const model = createTestModel();
         appServer.listModels = vi.fn().mockResolvedValue({data: [model], nextCursor: null});
@@ -496,6 +499,7 @@ describe('resume replay of Codex file citations', () => {
         completedAt: null,
         durationMs: null,
         items: [{
+            moderation: null,
             type: "agentMessage",
             id: "cited-reply",
             text: 'The limit is 12.\n\n:codex-file-citation{path="policy.txt" purpose="source"}',
@@ -533,7 +537,7 @@ describe('resume replay of Codex file citations', () => {
         const codexAcpClient = fixture.getCodexAcpClient();
         const appServer = fixture.getCodexAppServerClient();
         codexAcpClient.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
-        codexAcpClient.getAccount = vi.fn().mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        codexAcpClient.getAccount = vi.fn().mockResolvedValue({userId: null, account: null, requiresOpenaiAuth: false});
         codexAcpClient.listSkills = vi.fn().mockResolvedValue({data: []});
         const model = createTestModel();
         appServer.listModels = vi.fn().mockResolvedValue({data: [model], nextCursor: null});
@@ -603,7 +607,7 @@ describe('resume replay of async question answers', () => {
         const codexAcpClient = fixture.getCodexAcpClient();
         const appServer = fixture.getCodexAppServerClient();
         codexAcpClient.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
-        codexAcpClient.getAccount = vi.fn().mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        codexAcpClient.getAccount = vi.fn().mockResolvedValue({userId: null, account: null, requiresOpenaiAuth: false});
         codexAcpClient.listSkills = vi.fn().mockResolvedValue({data: []});
         const model = createTestModel();
         appServer.listModels = vi.fn().mockResolvedValue({data: [model], nextCursor: null});

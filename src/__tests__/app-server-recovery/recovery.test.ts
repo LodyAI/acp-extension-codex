@@ -1057,6 +1057,7 @@ describe("app-server recovery", () => {
             : {outcome: {outcome: "cancelled"}});
         const {prompt} = await startTurn(fixture, sessionId);
         const response = await fixture.current().rpc.requestHandlers.get("mcpServer/elicitation/request")!({
+            environmentId: null,
             threadId: sessionId, turnId: "turn-1", serverName: "auth-server", mode: "url", _meta: null,
             message: "Please authorize access", url: "https://example.com/authorize", elicitationId: "elicit-123",
         });

@@ -812,6 +812,8 @@ export class CodexEventHandler {
                 return null;
             // ignored events
             // These events have no standard ACP session update counterpart.
+            case "thread/section/changed":
+            case "thread/search/partial":
             case "thread/readState/changed":
             case "thread/prediction/updated":
             case "thread/deleted":

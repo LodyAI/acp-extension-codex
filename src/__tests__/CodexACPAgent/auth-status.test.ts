@@ -34,6 +34,7 @@ function authStatusUpdates(fixture: CodexMockTestFixture): AuthStatus[] {
 
 function mockAccount(fixture: CodexMockTestFixture, account: Account | null) {
     return vi.spyOn(fixture.getCodexAcpClient(), "getAccount").mockResolvedValue({
+        userId: null,
         account,
         requiresOpenaiAuth: account === null,
     });
@@ -151,7 +152,7 @@ describe("authStatus extension", () => {
             const modelProvider = vi.spyOn(client, "getModelProvider").mockReturnValue("wire");
             expect(await initializeAndAwaitFirstPush(fixture)).toEqual(centralStatus);
             await createPromptableSession(fixture);
-            fixture.getCodexAcpAgent().handleAccountUpdated({authMode: "chatgpt", planType: "pro"});
+            fixture.getCodexAcpAgent().handleAccountUpdated({reason: null, authMode: "chatgpt", planType: "pro"});
             await drainScheduledWork();
             expect(authStatusUpdates(fixture)).toEqual([centralStatus]);
             modelProvider.mockReturnValue("another");
@@ -345,7 +346,7 @@ describe("authStatus extension", () => {
             const accountSpy = mockAccount(fixture, {type: "chatgpt", email: "user@example.com", planType: "pro", workspaceName: null});
 
             await agent.authenticate({methodId: "chat-gpt"});
-            accountSpy.mockResolvedValue({account: null, requiresOpenaiAuth: true});
+            accountSpy.mockResolvedValue({userId: null, account: null, requiresOpenaiAuth: true});
             await agent.logout({});
 
             expect(authStatusUpdates(fixture)).toEqual([
@@ -365,7 +366,7 @@ describe("authStatus extension", () => {
             const agent = fixture.getCodexAcpAgent();
 
             await agent.authenticate({methodId: "chat-gpt"});
-            agent.handleAccountUpdated({authMode: "chatgpt", planType: "pro"});
+            agent.handleAccountUpdated({reason: null, authMode: "chatgpt", planType: "pro"});
 
             expect(await awaitAuthStatusUpdates(fixture, 2)).toEqual([
                 CHAT_GPT_PLUS,
@@ -385,7 +386,7 @@ describe("authStatus extension", () => {
             const agent = fixture.getCodexAcpAgent();
 
             await agent.authenticate({methodId: "chat-gpt"});
-            agent.handleAccountUpdated({authMode: "apikey", planType: null});
+            agent.handleAccountUpdated({reason: null, authMode: "apikey", planType: null});
 
             expect((await awaitAuthStatusUpdates(fixture, 2)).at(-1)).toEqual({
                 kind: "api_key",
@@ -400,7 +401,7 @@ describe("authStatus extension", () => {
             const agent = fixture.getCodexAcpAgent();
 
             await agent.authenticate({methodId: "chat-gpt"});
-            agent.handleAccountUpdated({authMode: "bedrockAccessKeys", planType: null});
+            agent.handleAccountUpdated({reason: null, authMode: "bedrockAccessKeys", planType: null});
 
             expect((await awaitAuthStatusUpdates(fixture, 2)).at(-1)).toEqual({
                 kind: "external",
@@ -419,7 +420,7 @@ describe("authStatus extension", () => {
             await agent.authenticate({methodId: "chat-gpt"});
             await agent.authenticate({methodId: "chat-gpt"});
             await agent.initialize({protocolVersion: PROTOCOL_VERSION});
-            agent.handleAccountUpdated({authMode: "chatgpt", planType: "plus"});
+            agent.handleAccountUpdated({reason: null, authMode: "chatgpt", planType: "plus"});
             await drainScheduledWork();
 
             expect(authStatusUpdates(fixture)).toEqual([CHAT_GPT_PLUS]);
@@ -436,6 +437,7 @@ describe("authStatus extension", () => {
 
             await agent.authenticate({methodId: "chat-gpt"});
             accountSpy.mockResolvedValue({
+                userId: null,
                 account: {type: "chatgpt", email: "user@example.com", planType: "pro", workspaceName: null},
                 requiresOpenaiAuth: false,
             });
@@ -457,8 +459,8 @@ describe("authStatus extension", () => {
             const agent = fixture.getCodexAcpAgent();
 
             await agent.authenticate(gatewayAuthRequest("ACME Gateway"));
-            agent.handleAccountUpdated({authMode: "chatgpt", planType: "pro"});
-            agent.handleAccountUpdated({authMode: null, planType: null});
+            agent.handleAccountUpdated({reason: null, authMode: "chatgpt", planType: "pro"});
+            agent.handleAccountUpdated({reason: null, authMode: null, planType: null});
             await drainScheduledWork();
 
             // The account push says nothing about gateway authentication, so it is ignored.
@@ -496,7 +498,7 @@ describe("authStatus extension", () => {
             await awaitAuthStatusUpdates(fixture, 1);
 
             // Someone logs in from another terminal while this connection is idle.
-            agent.handleAccountUpdated({authMode: "chatgpt", planType: "pro"});
+            agent.handleAccountUpdated({reason: null, authMode: "chatgpt", planType: "pro"});
 
             expect(await awaitAuthStatusUpdates(fixture, 2)).toEqual([
                 {kind: "none", label: "Not logged in"},
@@ -518,10 +520,10 @@ describe("authStatus extension", () => {
 
             await handler.handleNotification({
                 method: "account/updated",
-                params: {authMode: "chatgpt", planType: "plus"},
+                params: {reason: null, authMode: "chatgpt", planType: "plus"},
             });
 
-            expect(received).toEqual([{authMode: "chatgpt", planType: "plus"}]);
+            expect(received).toEqual([{reason: null, authMode: "chatgpt", planType: "plus"}]);
         });
     });
 });
@@ -530,18 +532,18 @@ describe("accountFromUpdated", () => {
     const chatGpt: Account = {type: "chatgpt", email: "user@example.com", planType: "plus", workspaceName: null};
 
     it("clears the account on a logout", () => {
-        expect(accountFromUpdated({authMode: null, planType: null}, chatGpt)).toBeNull();
+        expect(accountFromUpdated({reason: null, authMode: null, planType: null}, chatGpt)).toBeNull();
     });
 
     it("keeps the email of a ChatGPT account and takes the new plan", () => {
-        expect(accountFromUpdated({authMode: "chatgpt", planType: "pro"}, chatGpt))
+        expect(accountFromUpdated({reason: null, authMode: "chatgpt", planType: "pro"}, chatGpt))
             .toEqual({type: "chatgpt", email: "user@example.com", planType: "pro", workspaceName: null});
-        expect(accountFromUpdated({authMode: "chatgpt", planType: null}, {type: "apiKey"}))
+        expect(accountFromUpdated({reason: null, authMode: "chatgpt", planType: null}, {type: "apiKey"}))
             .toEqual({type: "chatgpt", email: null, planType: "unknown", workspaceName: null});
     });
 
     it("maps an API key and keeps the account for a mode with no account shape", () => {
-        expect(accountFromUpdated({authMode: "apikey", planType: null}, chatGpt)).toEqual({type: "apiKey"});
-        expect(accountFromUpdated({authMode: "headers", planType: null}, chatGpt)).toBe(chatGpt);
+        expect(accountFromUpdated({reason: null, authMode: "apikey", planType: null}, chatGpt)).toEqual({type: "apiKey"});
+        expect(accountFromUpdated({reason: null, authMode: "headers", planType: null}, chatGpt)).toBe(chatGpt);
     });
 });

@@ -4,6 +4,7 @@ import type {GetAccountResponse} from "../../app-server/v2";
 
 const SESSION_ID = "session-1";
 const SIGNED_IN: GetAccountResponse = {
+    userId: null,
     account: {type: "chatgpt", email: "user@example.com", planType: "plus"},
     requiresOpenaiAuth: true,
 } as GetAccountResponse;
@@ -27,7 +28,7 @@ function loadFixture(): CodexMockTestFixture {
         reasoningEffort: model.defaultReasoningEffort,
     });
     appServer.threadItemsList = vi.fn().mockResolvedValue({
-        data: [{turnId: "turn-1", item: {type: "agentMessage", id: "m-1", text: "history", phase: null, memoryCitation: null, delivery: null, questions: null}}],
+        data: [{turnId: "turn-1", item: {moderation: null, type: "agentMessage", id: "m-1", text: "history", phase: null, memoryCitation: null, delivery: null, questions: null}}],
         nextCursor: null,
         backwardsCursor: null,
     });
@@ -66,7 +67,7 @@ describe("CodexACPAgent - loadSession auth", () => {
         const fixture = loadFixture();
         const client = fixture.getCodexAcpClient();
         const appServer = fixture.getCodexAppServerClient();
-        appServer.accountRead = vi.fn().mockResolvedValue({account: null, requiresOpenaiAuth: true});
+        appServer.accountRead = vi.fn().mockResolvedValue({userId: null, account: null, requiresOpenaiAuth: true});
         const closeSpy = vi.spyOn(client, "closeSession").mockResolvedValue(undefined as never);
         await initialize(fixture);
 
@@ -81,7 +82,7 @@ describe("CodexACPAgent - loadSession auth", () => {
     it("fails with auth_required when the resume also fails", async () => {
         const fixture = loadFixture();
         const appServer = fixture.getCodexAppServerClient();
-        appServer.accountRead = vi.fn().mockResolvedValue({account: null, requiresOpenaiAuth: true});
+        appServer.accountRead = vi.fn().mockResolvedValue({userId: null, account: null, requiresOpenaiAuth: true});
         appServer.threadResume = vi.fn().mockRejectedValue(new Error("no rollout found for thread id session-1"));
         await initialize(fixture);
 

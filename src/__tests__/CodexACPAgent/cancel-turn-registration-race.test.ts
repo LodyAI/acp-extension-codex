@@ -77,7 +77,7 @@ async function startPrompt(): Promise<{
     const appServer = fixture.getCodexAppServerClient();
 
     vi.spyOn(codexAcpClient, "readAuthRequirement").mockResolvedValue({required: false, account: null});
-    vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
+    vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({userId: null, account: null, requiresOpenaiAuth: false});
     vi.spyOn(codexAcpClient, "newSession").mockResolvedValue({
         sessionId,
         currentModelId: "model-id[medium]",

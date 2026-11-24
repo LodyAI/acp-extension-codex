@@ -293,6 +293,7 @@ describe("CodexEventHandler - collab agent tool call events", () => {
 
         mockFixture.setElicitationResponse({action: "accept", content: {answer: "yes"}});
         await mockFixture.sendServerRequest("mcpServer/elicitation/request", {
+            environmentId: null,
             threadId: "thread-paris",
             turnId: "turn-child",
             serverName: "child-server",
@@ -311,6 +312,7 @@ describe("CodexEventHandler - collab agent tool call events", () => {
 
         mockFixture.setElicitationResponse({action: "accept"});
         await mockFixture.sendServerRequest("mcpServer/elicitation/request", {
+            environmentId: null,
             threadId: "thread-paris",
             turnId: "turn-child",
             serverName: "child-server",

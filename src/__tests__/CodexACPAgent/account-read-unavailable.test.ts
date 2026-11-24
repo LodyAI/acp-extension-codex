@@ -12,6 +12,7 @@ import type {GetAccountResponse} from "../../app-server/v2";
 
 const SESSION_ID = "session-1";
 const SIGNED_IN: GetAccountResponse = {
+    userId: null,
     account: {type: "chatgpt", email: "user@example.com", planType: "plus"},
     requiresOpenaiAuth: true,
 } as GetAccountResponse;
@@ -99,7 +100,7 @@ function fixtureWithSession(): CodexMockTestFixture {
         reasoningEffort: model.defaultReasoningEffort,
     });
     appServer.threadItemsList = vi.fn().mockResolvedValue({
-        data: [{turnId: "turn-1", item: {type: "agentMessage", id: "m-1", text: "history", phase: null, memoryCitation: null, delivery: null, questions: null}}],
+        data: [{turnId: "turn-1", item: {moderation: null, type: "agentMessage", id: "m-1", text: "history", phase: null, memoryCitation: null, delivery: null, questions: null}}],
         nextCursor: null,
         backwardsCursor: null,
     });
@@ -251,7 +252,7 @@ describe("CodexACPAgent - an unavailable account read", () => {
             await initialize(fixture);
 
             await loadAfterGrace(fixture);
-            read.resolve({account: null, requiresOpenaiAuth: true});
+            read.resolve({userId: null, account: null, requiresOpenaiAuth: true});
             await drainScheduledWork();
 
             expect(authStatusUpdates(fixture)).toEqual([NONE_STATUS]);
@@ -333,7 +334,7 @@ describe("CodexACPAgent - an unavailable account read", () => {
 
             secondRead.resolve(SIGNED_IN);
             await drainScheduledWork();
-            firstRead.resolve({account: {type: "apiKey"}, requiresOpenaiAuth: true} as GetAccountResponse);
+            firstRead.resolve({userId: null, account: {type: "apiKey"}, requiresOpenaiAuth: true} as GetAccountResponse);
             await drainScheduledWork();
 
             expect(authStatusUpdates(fixture)).toEqual([SIGNED_IN_STATUS]);
@@ -352,7 +353,7 @@ describe("CodexACPAgent - an unavailable account read", () => {
             const agent = fixture.getCodexAcpAgent();
 
             await loadAfterGrace(fixture);
-            agent.handleAccountUpdated({authMode: "apikey", planType: null});
+            agent.handleAccountUpdated({reason: null, authMode: "apikey", planType: null});
             await drainScheduledWork();
             read.resolve(SIGNED_IN);
             await drainScheduledWork();
@@ -424,7 +425,7 @@ describe("CodexACPAgent - an unavailable account read", () => {
         await initialize(fixture);
         const agent = fixture.getCodexAcpAgent();
 
-        agent.handleAccountUpdated({authMode: null, planType: null});
+        agent.handleAccountUpdated({reason: null, authMode: null, planType: null});
         await drainScheduledWork();
         await agent.newSession({cwd: "/test/project", mcpServers: []});
 

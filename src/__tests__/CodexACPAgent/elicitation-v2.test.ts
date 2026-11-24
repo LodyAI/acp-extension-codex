@@ -60,6 +60,7 @@ async function startRunningPrompt(client: PromptSession) {
 
 function oauthReauthParams(overrides: Partial<McpServerElicitationRequestParams & {mode: "url"}> = {}): McpServerElicitationRequestParams {
     return {
+        environmentId: null,
         threadId: sessionId,
         turnId,
         serverName: "auth-server",
@@ -140,6 +141,7 @@ describe('elicitation/create over ACP v2', () => {
         closeClient = () => client.connection.close();
         const {finishTurn} = await startRunningPrompt(client);
         const response = await client.triggerApproval("mcpServer/elicitation/request", {
+            environmentId: null,
             threadId: sessionId, turnId, serverName: "forms", mode: "form", _meta: null, message: "Choose",
             requestedSchema: {type: "object", properties: {value: {type: "_custom"}, answer: {type: "string"}}},
         });
@@ -291,7 +293,7 @@ describe('elicitation/create over ACP v2', () => {
         mocks.mockCodexConnection.sendRequest.mockImplementation(async (method: string) => {
             switch (method) {
                 case "account/read":
-                    return {account: null, requiresOpenaiAuth: true};
+                    return {userId: null, account: null, requiresOpenaiAuth: true};
                 case "account/login/start":
                     return {
                         type: "chatgptDeviceCode",

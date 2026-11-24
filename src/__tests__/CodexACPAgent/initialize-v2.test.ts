@@ -39,7 +39,7 @@ function connectRouter() {
         const codexAcpClient = new CodexAcpClient(new CodexAppServerClient(mocks.mockCodexConnection as any));
         codexClient = codexAcpClient;
         vi.spyOn(codexAcpClient, "getAgentConfiguredModelProvider").mockResolvedValue("openai");
-        vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: true});
+        vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({userId: null, account: null, requiresOpenaiAuth: true});
         agent = new CodexAcpServer(connection, codexAcpClient);
         return agent;
     });

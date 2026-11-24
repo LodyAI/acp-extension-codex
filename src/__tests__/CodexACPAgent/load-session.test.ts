@@ -57,7 +57,7 @@ describe("CodexACPAgent - loadSession", () => {
         const client = fixture.getCodexAcpClient();
         const appServer = fixture.getCodexAppServerClient();
         client.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
-        client.getAccount = vi.fn().mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        client.getAccount = vi.fn().mockResolvedValue({userId: null, account: null, requiresOpenaiAuth: false});
         client.listSkills = vi.fn().mockResolvedValue({data: []});
         const model = createTestModel();
         appServer.listModels = vi.fn().mockResolvedValue({data: [model], nextCursor: null});
@@ -165,6 +165,7 @@ describe("CodexACPAgent - loadSession", () => {
                 durationMs: null,
             },
             {
+                moderation: null,
                 type: "agentMessage",
                 id: "child-history-message-1",
                 text: "Persisted first-generation output",
@@ -185,6 +186,7 @@ describe("CodexACPAgent - loadSession", () => {
             completedAt: firstChildTurn.completedAt,
             durationMs: firstChildTurn.durationMs,
             items: [{
+                moderation: null,
                 type: "agentMessage",
                 id: "child-history-message-2",
                 text: "Persisted second-generation output",
@@ -257,7 +259,7 @@ describe("CodexACPAgent - loadSession", () => {
         const client = fixture.getCodexAcpClient();
         const appServer = fixture.getCodexAppServerClient();
         client.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
-        client.getAccount = vi.fn().mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        client.getAccount = vi.fn().mockResolvedValue({userId: null, account: null, requiresOpenaiAuth: false});
         client.listSkills = vi.fn().mockResolvedValue({data: []});
         const model = createTestModel();
         appServer.listModels = vi.fn().mockResolvedValue({data: [model], nextCursor: null});
@@ -312,6 +314,7 @@ describe("CodexACPAgent - loadSession", () => {
             agentPath: "/root/reviewer",
         });
         const message = (id: string) => ({
+            moderation: null,
             type: "agentMessage" as const,
             id,
             text: id,
@@ -404,7 +407,7 @@ describe("CodexACPAgent - loadSession", () => {
         const client = fixture.getCodexAcpClient();
         const appServer = fixture.getCodexAppServerClient();
         client.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
-        client.getAccount = vi.fn().mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        client.getAccount = vi.fn().mockResolvedValue({userId: null, account: null, requiresOpenaiAuth: false});
         client.listSkills = vi.fn().mockResolvedValue({data: []});
         const model = createTestModel();
         appServer.listModels = vi.fn().mockResolvedValue({data: [model], nextCursor: null});
@@ -536,6 +539,7 @@ describe("CodexACPAgent - loadSession", () => {
 
         codexAcpClient.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
         codexAcpClient.getAccount = vi.fn().mockResolvedValue({
+            userId: null,
             account: null,
             requiresOpenaiAuth: false,
         });
@@ -549,7 +553,7 @@ describe("CodexACPAgent - loadSession", () => {
             availabilityNux: null,
             modelSpecialty: null,
             multiAgentVersion: null,
-            availableAccessPrograms: {cyber: []},
+            availableAccessPrograms: {daybreakAvailability: "default", cyber: []},
             displayName: "GPT-5.2",
             description: "Test model",
             hidden: false,
@@ -616,9 +620,12 @@ describe("CodexACPAgent - loadSession", () => {
                             content: [
                                 { type: "text", text: "Hi", text_elements: [] },
                                 { type: "image", url: "https://example.com/image.png" },
+                                { type: "audio", url: "https://example.com/audio.wav" },
+                                { type: "audio", fileId: "file-audio" },
                             ],
                         },
                         {
+                            moderation: null,
                             type: "agentMessage",
                             id: "item-agent-1",
                             text: "Hello!",
@@ -661,6 +668,7 @@ describe("CodexACPAgent - loadSession", () => {
                             status: "completed",
                         },
                         {
+                            environmentId: null,
                             type: "mcpToolCall",
                             id: "item-mcp-1",
                             server: "github",
@@ -774,6 +782,7 @@ describe("CodexACPAgent - loadSession", () => {
 
         codexAcpClient.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
         codexAcpClient.getAccount = vi.fn().mockResolvedValue({
+            userId: null,
             account: null,
             requiresOpenaiAuth: false,
         });
@@ -787,7 +796,7 @@ describe("CodexACPAgent - loadSession", () => {
             availabilityNux: null,
             modelSpecialty: null,
             multiAgentVersion: null,
-            availableAccessPrograms: {cyber: []},
+            availableAccessPrograms: {daybreakAvailability: "default", cyber: []},
             displayName: "GPT-5.2",
             description: "Test model",
             hidden: false,
@@ -1012,6 +1021,7 @@ describe("CodexACPAgent - loadSession", () => {
 
             codexAcpClient.readAuthRequirement = vi.fn().mockResolvedValue(false);
             codexAcpClient.getAccount = vi.fn().mockResolvedValue({
+                userId: null,
                 account: null,
                 requiresOpenaiAuth: false,
             });
@@ -1079,6 +1089,7 @@ describe("CodexACPAgent - loadSession", () => {
                                 text: "Inspect project files",
                             },
                             {
+                                moderation: null,
                                 type: "agentMessage",
                                 id: "item-agent-1",
                                 text: "The directory contains README.md and src.",
@@ -1135,6 +1146,7 @@ describe("CodexACPAgent - loadSession", () => {
 
         codexAcpClient.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
         codexAcpClient.getAccount = vi.fn().mockResolvedValue({
+            userId: null,
             account: null,
             requiresOpenaiAuth: false,
         });
@@ -1148,7 +1160,7 @@ describe("CodexACPAgent - loadSession", () => {
             availabilityNux: null,
             modelSpecialty: null,
             multiAgentVersion: null,
-            availableAccessPrograms: {cyber: []},
+            availableAccessPrograms: {daybreakAvailability: "default", cyber: []},
             displayName: "GPT-5.2",
             description: "Test model",
             hidden: false,
@@ -1229,6 +1241,7 @@ describe("CodexACPAgent - loadSession", () => {
         fixture.sendServerNotification({
             method: "mcpServer/startupStatus/updated",
             params: {
+                environmentId: null,
                 threadId: "session-1",
                 name: "broken-mcp",
                 status: "failed",

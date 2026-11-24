@@ -149,7 +149,7 @@ describe("Model filtering", () => {
             collaborationMode: "default",
             additionalDirectories: [],
         });
-        vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({userId: null, account: null, requiresOpenaiAuth: false});
 
         const newSessionResponse = await codexAcpAgent.newSession({ cwd: "", mcpServers: [] });
         const sessionModels = newSessionResponse.models;

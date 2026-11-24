@@ -41,7 +41,7 @@ export function defaultAnswer(method: string, params: unknown): unknown {
     switch (method) {
         case "initialize": return {userAgent: "codex-test", codexHome: "/codex-home"};
         case "model/list": return {data: [MODEL], nextCursor: null};
-        case "account/read": return {account: null, requiresOpenaiAuth: false};
+        case "account/read": return {userId: null, account: null, requiresOpenaiAuth: false};
         case "config/read": return {config: {}, origins: {}, layers: null};
         case "skills/list": return {data: []};
         case "thread/start": return {thread: thread(p.ephemeral ? "title-thread" : "thread-new"), model: "gpt-test", modelProvider: "openai", reasoningEffort: "medium", serviceTier: null, cwd: "/work"};

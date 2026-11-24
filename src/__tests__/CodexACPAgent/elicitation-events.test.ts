@@ -71,6 +71,7 @@ describe('Elicitation Events', () => {
             });
 
             const params: McpServerElicitationRequestParams = {
+                environmentId: null,
                 threadId: sessionId, turnId: 'turn-1', serverName: 'test-server',
                 mode: 'form', _meta: null, message: 'Please provide your username',
                 requestedSchema: { type: 'object', properties: { username: { type: 'string' } }, required: ['username'] },
@@ -109,6 +110,7 @@ describe('Elicitation Events', () => {
             });
 
             const params: McpServerElicitationRequestParams = {
+                environmentId: null,
                 threadId: sessionId, turnId: 'turn-1', serverName: 'test-server',
                 mode: 'form', _meta: null, message: 'Pick a color',
                 requestedSchema: {
@@ -149,6 +151,7 @@ describe('Elicitation Events', () => {
             });
 
             const params: McpServerElicitationRequestParams = {
+                environmentId: null,
                 threadId: sessionId, turnId: 'turn-1', serverName: 'test-server',
                 mode: 'form', _meta: null, message: 'Please provide your username',
                 requestedSchema: { type: 'object', properties: { username: { type: 'string' } }, required: ['username'] },
@@ -171,6 +174,7 @@ describe('Elicitation Events', () => {
             } as acp.CreateElicitationResponse);
 
             const params: McpServerElicitationRequestParams = {
+                environmentId: null,
                 threadId: sessionId, turnId: 'turn-1', serverName: 'test-server',
                 mode: 'form', _meta: null, message: 'Please provide your username',
                 requestedSchema: { type: 'object', properties: { username: { type: 'string' } }, required: ['username'] },
@@ -188,6 +192,7 @@ describe('Elicitation Events', () => {
             fixture.setPermissionResponse({ outcome: { outcome: 'selected', optionId: 'accept' } });
 
             const params: McpServerElicitationRequestParams = {
+                environmentId: null,
                 threadId: sessionId, turnId: 'turn-1', serverName: 'test-server',
                 mode: 'form', _meta: null, message: 'Please provide your username',
                 requestedSchema: { type: 'object', properties: { username: { type: 'string' } }, required: ['username'] },
@@ -206,6 +211,7 @@ describe('Elicitation Events', () => {
             fixture.setPermissionResponse({ outcome: { outcome: 'selected', optionId: 'decline' } });
 
             const params: McpServerElicitationRequestParams = {
+                environmentId: null,
                 threadId: sessionId, turnId: 'turn-1', serverName: 'test-server',
                 mode: 'form', _meta: null, message: 'Please provide info',
                 requestedSchema: { type: 'object', properties: {} },
@@ -222,6 +228,7 @@ describe('Elicitation Events', () => {
             const { promptPromise, completeTurn } = setupSessionWithPendingPrompt();
             fixture.setPermissionResponse({ outcome: { outcome: 'selected', optionId: 'cancel' } });
             const params: McpServerElicitationRequestParams = {
+                environmentId: null,
                 threadId: sessionId, turnId: 'turn-1', serverName: 'test-server',
                 mode: 'form', _meta: null, message: 'Please provide info',
                 requestedSchema: { type: 'object', properties: {} },
@@ -243,6 +250,7 @@ describe('Elicitation Events', () => {
             fixture.setPermissionResponse({ outcome: { outcome: 'cancelled' } });
 
             const params: McpServerElicitationRequestParams = {
+                environmentId: null,
                 threadId: sessionId, turnId: 'turn-1', serverName: 'test-server',
                 mode: 'form', _meta: null, message: 'Please provide info',
                 requestedSchema: { type: 'object', properties: {} },
@@ -257,6 +265,7 @@ describe('Elicitation Events', () => {
 
         it('should return cancel when no handler registered', async () => {
             const params: McpServerElicitationRequestParams = {
+                environmentId: null,
                 threadId: 'non-existent-session', turnId: null, serverName: 'test-server',
                 mode: 'form', _meta: null, message: 'Please provide info',
                 requestedSchema: { type: 'object', properties: {} },
@@ -271,6 +280,7 @@ describe('Elicitation Events', () => {
             fixture.setPermissionResponse({ outcome: { outcome: 'selected', optionId: 'accept' } });
 
             const params: McpServerElicitationRequestParams = {
+                environmentId: null,
                 threadId: sessionId, turnId: 'turn-1', serverName: 'my-mcp-server',
                 mode: 'form', _meta: null, message: 'Please provide your GitHub username',
                 requestedSchema: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
@@ -301,6 +311,7 @@ describe('Elicitation Events', () => {
                     turnId: 'turn-1',
                     startedAtMs: 0,
                     item: {
+                        environmentId: null,
                         type: "mcpToolCall",
                         id: "call-id",
                         server: "tool-server",
@@ -321,6 +332,7 @@ describe('Elicitation Events', () => {
             fixture.clearAcpConnectionDump();
 
             const params: McpServerElicitationRequestParams = {
+                environmentId: null,
                 threadId: sessionId, turnId: 'turn-1', serverName: 'tool-server',
                 mode: 'form',
                 _meta: { codex_approval_kind: 'mcp_tool_call', persist: ['session', 'always'] },
@@ -360,6 +372,7 @@ describe('Elicitation Events', () => {
             });
             fixture.setElicitationResponse({action: 'decline'});
             const params: McpServerElicitationRequestParams = {
+                environmentId: null,
                 threadId: sessionId, turnId: 'turn-1', serverName: 'tool-server',
                 mode: 'form',
                 _meta: {codex_approval_kind: 'mcp_tool_call'},
@@ -377,6 +390,7 @@ describe('Elicitation Events', () => {
             fixture.setPermissionResponse({ outcome: { outcome: 'selected', optionId: McpApprovalOptionId.AllowOnce } });
 
             const params: McpServerElicitationRequestParams = {
+                environmentId: null,
                 threadId: sessionId, turnId: 'turn-1', serverName: 'tool-server',
                 mode: 'form',
                 _meta: { codex_approval_kind: 'mcp_tool_call', persist: ['session', 'always'] },
@@ -396,6 +410,7 @@ describe('Elicitation Events', () => {
             fixture.setPermissionResponse({ outcome: { outcome: 'selected', optionId: McpApprovalOptionId.AllowOnce } });
 
             const params: McpServerElicitationRequestParams = {
+                environmentId: null,
                 threadId: sessionId, turnId: 'turn-1', serverName: 'tool-server',
                 mode: 'form',
                 _meta: { codex_approval_kind: 'mcp_tool_call', persist: ['session', 'always'] },
@@ -415,6 +430,7 @@ describe('Elicitation Events', () => {
             fixture.setPermissionResponse({ outcome: { outcome: 'selected', optionId: McpApprovalOptionId.AllowSession } });
 
             const params: McpServerElicitationRequestParams = {
+                environmentId: null,
                 threadId: sessionId, turnId: 'turn-1', serverName: 'tool-server',
                 mode: 'form',
                 _meta: { codex_approval_kind: 'mcp_tool_call', persist: ['session', 'always'] },
@@ -434,6 +450,7 @@ describe('Elicitation Events', () => {
             fixture.setPermissionResponse({ outcome: { outcome: 'selected', optionId: McpApprovalOptionId.AllowAlways } });
 
             const params: McpServerElicitationRequestParams = {
+                environmentId: null,
                 threadId: sessionId, turnId: 'turn-1', serverName: 'tool-server',
                 mode: 'form',
                 _meta: { codex_approval_kind: 'mcp_tool_call', persist: ['session', 'always'] },
@@ -452,6 +469,7 @@ describe('Elicitation Events', () => {
             const { promptPromise, completeTurn } = setupSessionWithPendingPrompt();
             fixture.setPermissionResponse({ outcome: { outcome: 'selected', optionId: McpApprovalOptionId.AllowAlways } });
             const params: McpServerElicitationRequestParams = {
+                environmentId: null,
                 threadId: sessionId, turnId: 'turn-1', serverName: 'tool-server',
                 mode: 'form',
                 _meta: { codex_approval_kind: 'mcp_tool_call' },
@@ -474,6 +492,7 @@ describe('Elicitation Events', () => {
             });
             fixture.setElicitationResponse({ action: 'accept', content: { persist: 'always' } });
             const params: McpServerElicitationRequestParams = {
+                environmentId: null,
                 threadId: sessionId, turnId: 'turn-1', serverName: 'tool-server',
                 mode: 'form',
                 _meta: { codex_approval_kind: 'mcp_tool_call' },
@@ -491,6 +510,7 @@ describe('Elicitation Events', () => {
             fixture.setPermissionResponse({ outcome: { outcome: 'selected', optionId: McpApprovalOptionId.AllowOnce } });
 
             const params: McpServerElicitationRequestParams = {
+                environmentId: null,
                 threadId: sessionId, turnId: 'turn-1', serverName: 'tool-server',
                 mode: 'form',
                 _meta: { codex_approval_kind: 'mcp_tool_call', persist: 'session' },
@@ -510,6 +530,7 @@ describe('Elicitation Events', () => {
             fixture.setPermissionResponse({ outcome: { outcome: 'selected', optionId: McpApprovalOptionId.AllowOnce } });
 
             const params: McpServerElicitationRequestParams = {
+                environmentId: null,
                 threadId: sessionId, turnId: 'turn-1', serverName: 'tool-server',
                 mode: 'form',
                 _meta: { codex_approval_kind: 'mcp_tool_call' },
@@ -528,6 +549,7 @@ describe('Elicitation Events', () => {
             const { promptPromise, completeTurn } = setupSessionWithPendingPrompt();
             fixture.setPermissionResponse({ outcome: { outcome: 'selected', optionId: McpApprovalOptionId.Cancel } });
             const params: McpServerElicitationRequestParams = {
+                environmentId: null,
                 threadId: sessionId, turnId: 'turn-1', serverName: 'tool-server',
                 mode: 'form',
                 _meta: { codex_approval_kind: 'mcp_tool_call' },
@@ -555,6 +577,7 @@ describe('Elicitation Events', () => {
                         turnId: 'turn-1',
                         startedAtMs: 0,
                         item: {
+                            environmentId: null,
                             type: 'mcpToolCall', id, server: 'tool-server', tool: 'tool-name',
                             status: 'inProgress', arguments: {id}, appContext: null, readOnlyHint: null,
                             pluginId: null, result: null, error: null, durationMs: null,
@@ -565,6 +588,7 @@ describe('Elicitation Events', () => {
             await fixture.getCodexAcpClient().waitForSessionNotifications(sessionId);
             fixture.clearAcpConnectionDump();
             const params: McpServerElicitationRequestParams = {
+                environmentId: null,
                 threadId: sessionId, turnId: 'turn-1', serverName: 'tool-server',
                 mode: 'form', _meta: {codex_approval_kind: 'mcp_tool_call'},
                 message: 'Allow one of the concurrent calls?',
@@ -595,6 +619,7 @@ describe('Elicitation Events', () => {
                     turnId: 'turn-1',
                     startedAtMs: 0,
                     item: {
+                        environmentId: null,
                         type: "mcpToolCall",
                         id: "completed-call-id",
                         server: "tool-server",
@@ -618,6 +643,7 @@ describe('Elicitation Events', () => {
                     turnId: 'turn-1',
                     completedAtMs: 0,
                     item: {
+                        environmentId: null,
                         type: "mcpToolCall",
                         id: "completed-call-id",
                         server: "tool-server",
@@ -641,6 +667,7 @@ describe('Elicitation Events', () => {
             fixture.clearAcpConnectionDump();
 
             const params: McpServerElicitationRequestParams = {
+                environmentId: null,
                 threadId: sessionId, turnId: 'turn-2', serverName: 'tool-server',
                 mode: 'form',
                 _meta: { codex_approval_kind: 'mcp_tool_call', persist: ['session', 'always'] },
@@ -669,6 +696,7 @@ describe('Elicitation Events', () => {
                     turnId: 'turn-1',
                     startedAtMs: 0,
                     item: {
+                        environmentId: null,
                         type: "mcpToolCall",
                         id: "interrupted-call-id",
                         server: "tool-server",
@@ -699,6 +727,7 @@ describe('Elicitation Events', () => {
             fixture.clearAcpConnectionDump();
 
             const params: McpServerElicitationRequestParams = {
+                environmentId: null,
                 threadId: sessionId, turnId: 'turn-2', serverName: 'tool-server',
                 mode: 'form',
                 _meta: { codex_approval_kind: 'mcp_tool_call', persist: ['session', 'always'] },
@@ -761,6 +790,7 @@ describe('Elicitation Events', () => {
             fixture.setElicitationResponse({ action: 'accept', _meta: { source: 'client' } });
 
             const params: McpServerElicitationRequestParams = {
+                environmentId: null,
                 threadId: sessionId, turnId: 'turn-1', serverName: 'auth-server',
                 mode: 'url', _meta: null, message: 'Please authorize access',
                 url: 'https://example.com/authorize', elicitationId: 'elicit-123',
@@ -806,6 +836,7 @@ describe('Elicitation Events', () => {
             fixture.setPermissionResponse({ outcome: { outcome: 'selected', optionId: 'accept' } });
 
             const params: McpServerElicitationRequestParams = {
+                environmentId: null,
                 threadId: sessionId, turnId: 'turn-1', serverName: 'auth-server',
                 mode: 'url', _meta: null, message: 'Please authorize access',
                 url: 'https://example.com/authorize', elicitationId: 'elicit-123',
@@ -823,6 +854,7 @@ describe('Elicitation Events', () => {
             fixture.setPermissionResponse({ outcome: { outcome: 'cancelled' } });
 
             const params: McpServerElicitationRequestParams = {
+                environmentId: null,
                 threadId: sessionId, turnId: null, serverName: 'auth-server',
                 mode: 'url', _meta: null, message: 'Authorization required',
                 url: 'https://example.com/authorize', elicitationId: 'elicit-456',
@@ -840,6 +872,7 @@ describe('Elicitation Events', () => {
             fixture.setPermissionResponse({ outcome: { outcome: 'selected', optionId: 'accept' } });
 
             const params: McpServerElicitationRequestParams = {
+                environmentId: null,
                 threadId: sessionId, turnId: 'turn-1', serverName: 'auth-server',
                 mode: 'url', _meta: null,
                 message: 'Please authorize access to your GitHub account',

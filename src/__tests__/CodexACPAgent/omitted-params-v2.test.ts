@@ -21,12 +21,12 @@ function connectRaw() {
     mocks.mockCodexConnection.sendRequest.mockImplementation(async (method: string) => {
         switch (method) {
             case "account/read":
-                return {account: {type: "apiKey"}, requiresOpenaiAuth: true};
+                return {userId: null, account: {type: "apiKey"}, requiresOpenaiAuth: true};
             case "thread/list":
                 return {data: [], nextCursor: null};
             case "account/logout":
                 // `logout()` awaits this notification before resolving.
-                setImmediate(() => mocks.notificationHandlers.get("account/updated")?.({authMode: null, planType: null}));
+                setImmediate(() => mocks.notificationHandlers.get("account/updated")?.({reason: null, authMode: null, planType: null}));
                 return {};
             default:
                 return {};

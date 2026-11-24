@@ -42,7 +42,7 @@ function createFixture(
     const appServer = fixture.getCodexAppServerClient();
     vi.spyOn(appServer, "listModels").mockResolvedValue({data: models, nextCursor: null});
     vi.spyOn(fixture.getCodexAcpClient(), "readAuthRequirement").mockResolvedValue({required: false, account: null});
-    vi.spyOn(fixture.getCodexAcpClient(), "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
+    vi.spyOn(fixture.getCodexAcpClient(), "getAccount").mockResolvedValue({userId: null, account: null, requiresOpenaiAuth: false});
     return fixture;
 }
 

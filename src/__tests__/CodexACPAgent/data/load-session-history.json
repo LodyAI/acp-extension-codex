@@ -89,6 +89,38 @@
     {
       "sessionId": "session-1",
       "update": {
+        "sessionUpdate": "user_message_chunk",
+        "messageId": "item-user-1",
+        "content": {
+          "type": "text",
+          "text": "[@audio](https://example.com/audio.wav)"
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "session-1",
+      "update": {
+        "sessionUpdate": "user_message_chunk",
+        "messageId": "item-user-1",
+        "content": {
+          "type": "text",
+          "text": "audio:file-audio"
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "session-1",
+      "update": {
         "sessionUpdate": "agent_message_chunk",
         "messageId": "item-agent-1",
         "content": {
