@@ -2,6 +2,7 @@
  * The AIR `sessionIndex` extension as `CodexAcpServer` serves it: the session list, `_session/rename`,
  * `_session/archive`, `_session/unarchive`, `session/delete` and `_session/list/subscribe`.
  * `session/set_title` shares its title writer without requiring AIR capabilities.
+ * Core archive reuses the native mutations without AIR negotiation.
  * See `SessionIndex.ts` and `docs/air-extensions.md`.
  */
 
@@ -250,10 +251,27 @@ export class SessionIndexService {
      */
     async setArchived({sessionId}: SessionArchiveRequest, archived: boolean): Promise<Record<string, never>> {
         this.require(archived ? SESSION_ARCHIVE_METHOD : SESSION_UNARCHIVE_METHOD);
+        return this.applyArchived({sessionId}, archived, false);
+    }
+
+    /** Core lifecycle requests require an already released runtime. */
+    async setLodyArchived(params: SessionArchiveRequest, archived: boolean): Promise<Record<string, never>> {
+        return this.applyArchived(params, archived, true);
+    }
+
+    private async applyArchived(
+        {sessionId}: SessionArchiveRequest,
+        archived: boolean,
+        requireReleased: boolean,
+    ): Promise<Record<string, never>> {
         logger.log(archived ? "Archiving session..." : "Unarchiving session...", {sessionId});
         await this.host.ensureAppServer();
-        // Read before the fence, which counts as open.
+        // Read before the fence, which counts as open. No await separates this check from the fence,
+        // so an open that starts during app-server startup is seen here instead of being closed below.
         const open = this.host.hasLocalSession(sessionId);
+        if (requireReleased && open) {
+            throw RequestError.invalidRequest({sessionId}, "Close the session before archiving or restoring it");
+        }
         // An open of the session that starts meanwhile would load the thread that Codex archives.
         if (archived) this.host.beginSessionCloseFence(sessionId);
         try {
