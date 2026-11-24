@@ -31,6 +31,10 @@
       "lody": {
         "promptSuggestions": {
           "version": 1
+        },
+        "sessionArchive": {
+          "version": 1,
+          "mode": "native"
         }
       }
     }

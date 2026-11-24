@@ -1,3 +1,4 @@
+import {LODY_EXTENSION_METHODS} from "acp-extension-core";
 import * as acp from "@agentclientprotocol/sdk/unstable";
 import {z} from "zod";
 import type {CodexAcpServer} from "./CodexAcpServer";
@@ -86,6 +87,8 @@ export function createCodexAcpApp(options: CodexAcpAppOptions): acp.AgentApp {
         .onRequest("authentication/logout", emptyExtensionParamsParser, (ctx) => getAgent().extMethod("authentication/logout", ctx.params))
         .onRequest(LEGACY_SET_SESSION_MODEL_METHOD, legacySetSessionModelParamsParser, (ctx) => getAgent().extMethod(LEGACY_SET_SESSION_MODEL_METHOD, ctx.params))
         .onRequest(LODY_RATE_LIMITS_GET_METHOD, lodyRateLimitsGetParamsParser, () => getAgent().readRateLimits())
+        .onRequest(LODY_EXTENSION_METHODS.sessionArchive, lodyReadSessionHistoryParamsParser, (ctx) => getAgent().sessionIndex.setLodyArchived(ctx.params, true))
+        .onRequest(LODY_EXTENSION_METHODS.sessionUnarchive, lodyReadSessionHistoryParamsParser, (ctx) => getAgent().sessionIndex.setLodyArchived(ctx.params, false))
         .onRequest(LODY_READ_SESSION_HISTORY_METHOD, lodyReadSessionHistoryParamsParser, (ctx) => getAgent().readSessionHistory(ctx.params))
         .onRequest(SESSION_STEERING_METHOD, sessionSteerParamsParser, (ctx) => getAgent().extMethod(SESSION_STEERING_METHOD, ctx.params))
         .onRequest(ASYNC_TASK_STOP_METHOD, asyncTaskStopParamsParser, (ctx) => getAgent().extMethod(ASYNC_TASK_STOP_METHOD, ctx.params));
