@@ -3,7 +3,7 @@ Set `CODEX_PATH` to run a different Codex binary; versions other than the one sp
 
 ### Lody subagent event transport
 
-The event contract is supplied by the published Core 0.1.9 dependency.
+The event contract is supplied by the published Core 0.4.0 dependency.
 
 Clients advertising `_meta.lody.subagentEvents: {version: 1}` receive Core
 `_lody/subagents/event` notifications. Child execution IDs are scoped to the root
@@ -527,7 +527,7 @@ messages or changing prompt outcomes. No request is made to generate predictions
 native runtime settings and availability remain authoritative.
 
 The prompt-suggestion contract is provided by the pinned
-Core dependency (temporarily pinned to the upstream LodyAI archive contract commit until its release).
+`acp-extension-core@0.4.0` dependency.
 
 ## Lody session archive
 
