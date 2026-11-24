@@ -26,6 +26,11 @@ import {
     sessionListSubscriptionParamsParser,
     sessionRenameParamsParser,
 } from "./SessionIndex";
+import {
+    MCP_APP_LOAD_METHOD,
+    MCP_APP_RESOURCE_READ_METHOD,
+    MCP_APP_TOOL_CALL_METHOD,
+} from "./McpApps";
 
 const emptyExtensionParamsParser = z.preprocess(
     (params) => params ?? {},
@@ -73,6 +78,20 @@ const hooksListParamsParser = z.object({cwd: z.string().trim().min(1)});
 const hooksTrustParamsParser = z.object({
     cwd: z.string().trim().min(1),
     hooks: z.array(z.object({key: z.string().min(1), currentHash: z.string().min(1)})).min(1),
+});
+
+const mcpAppLoadParamsParser = z.object({
+    sessionId: z.string().min(1),
+    toolCallId: z.string().min(1),
+}).passthrough();
+
+const mcpAppResourceReadParamsParser = mcpAppLoadParamsParser.extend({
+    uri: z.string().min(1),
+});
+
+const mcpAppToolCallParamsParser = mcpAppLoadParamsParser.extend({
+    name: z.string().min(1),
+    arguments: z.record(z.string(), z.unknown()).optional(),
 });
 
 /**
@@ -231,7 +250,11 @@ function createRouter(
         .onRequest(SESSION_ARCHIVE_METHOD, sessionArchiveParamsParser, (ctx) => getAgent(ctx.params).sessionIndex.setArchived(ctx.params, true))
         .onRequest(SESSION_UNARCHIVE_METHOD, sessionArchiveParamsParser, (ctx) => getAgent(ctx.params).sessionIndex.setArchived(ctx.params, false))
         .onRequest(SESSION_LIST_SUBSCRIBE_METHOD, sessionListSubscriptionParamsParser, (ctx) => getAgent().sessionIndex.subscribeList(ctx.params))
-        .onRequest(SESSION_LIST_UNSUBSCRIBE_METHOD, sessionListSubscriptionParamsParser, (ctx) => getAgent().sessionIndex.unsubscribeList(ctx.params));
+        .onRequest(SESSION_LIST_UNSUBSCRIBE_METHOD, sessionListSubscriptionParamsParser, (ctx) => getAgent().sessionIndex.unsubscribeList(ctx.params))
+        // App tool calls act on external MCP servers, so subagent sessions refuse them like other mutations.
+        .onRequest(MCP_APP_LOAD_METHOD, mcpAppLoadParamsParser, (ctx) => getAgent().mcpAppLoad(ctx.params))
+        .onRequest(MCP_APP_RESOURCE_READ_METHOD, mcpAppResourceReadParamsParser, (ctx) => getAgent().mcpAppResourceRead(ctx.params))
+        .onRequest(MCP_APP_TOOL_CALL_METHOD, mcpAppToolCallParamsParser, (ctx) => getAgent(ctx.params).mcpAppToolCall(ctx.params));
 
     const v2Agent = acpV2.agent({name: packageJson.name})
         .onConnect((connection) => attachAgent(createAgent(new AcpV2Connection(connection.client)), connection.signal))
@@ -266,7 +289,11 @@ function createRouter(
         .onRequest(SESSION_UNARCHIVE_METHOD, sessionArchiveParamsParser, (ctx) => getAgent(ctx.params).sessionIndex.setArchived(ctx.params, false))
         .onRequest(SESSION_BATCH_GET_METHOD, sessionBatchGetParamsParser, (ctx) => getAgent().sessionIndex.batchGet(ctx.params))
         .onRequest(SESSION_LIST_SUBSCRIBE_METHOD, sessionListSubscriptionParamsParser, (ctx) => getAgent().sessionIndex.subscribeList(ctx.params))
-        .onRequest(SESSION_LIST_UNSUBSCRIBE_METHOD, sessionListSubscriptionParamsParser, (ctx) => getAgent().sessionIndex.unsubscribeList(ctx.params));
+        .onRequest(SESSION_LIST_UNSUBSCRIBE_METHOD, sessionListSubscriptionParamsParser, (ctx) => getAgent().sessionIndex.unsubscribeList(ctx.params))
+        // App tool calls act on external MCP servers, so subagent sessions refuse them like other mutations.
+        .onRequest(MCP_APP_LOAD_METHOD, mcpAppLoadParamsParser, (ctx) => getAgent().mcpAppLoad(ctx.params))
+        .onRequest(MCP_APP_RESOURCE_READ_METHOD, mcpAppResourceReadParamsParser, (ctx) => getAgent().mcpAppResourceRead(ctx.params))
+        .onRequest(MCP_APP_TOOL_CALL_METHOD, mcpAppToolCallParamsParser, (ctx) => getAgent(ctx.params).mcpAppToolCall(ctx.params));
 
     return acpV2.agentProtocolRouter().withV1(v1Agent).withV2(v2Agent);
 }

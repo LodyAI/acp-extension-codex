@@ -87,6 +87,7 @@ export const CODEX_LODY_CAPABILITIES = {
     sessionHistory: {version: 1},
     sessionArchive: {version: 1, mode: "native"},
     worktreeProject: {version: 1},
+    mcpApps: {version: 1},
 } as const satisfies LodyExtensionCapabilities;
 export function getLodyForkTurnId(meta: unknown): string | null {
     if (typeof meta !== "object" || meta === null) return null;

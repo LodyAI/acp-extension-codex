@@ -31,12 +31,16 @@ import type {
     LoginAccountParams,
     LoginAccountResponse,
     LogoutAccountResponse,
+    McpResourceReadParams,
+    McpResourceReadResponse,
     McpServerElicitationRequestParams,
     McpServerElicitationRequestResponse,
     McpServerOauthLoginParams,
     McpServerOauthLoginResponse,
     McpServerRefreshResponse,
     McpServerStatusUpdatedNotification,
+    McpServerToolCallParams,
+    McpServerToolCallResponse,
     ModelListParams,
     ModelListResponse,
     PermissionProfileListParams,
@@ -925,6 +929,14 @@ export class CodexAppServerClient {
 
     async mcpServerReload(): Promise<McpServerRefreshResponse> {
         return await this.sendRequest({ method: "config/mcpServer/reload", params: undefined });
+    }
+
+    async mcpResourceRead(params: McpResourceReadParams): Promise<McpResourceReadResponse> {
+        return await this.sendRequest({ method: "mcpServer/resource/read", params });
+    }
+
+    async mcpServerToolCall(params: McpServerToolCallParams): Promise<McpServerToolCallResponse> {
+        return await this.sendRequest({ method: "mcpServer/tool/call", params });
     }
 
     async mcpServerOauthLogin(params: McpServerOauthLoginParams): Promise<McpServerOauthLoginResponse> {
