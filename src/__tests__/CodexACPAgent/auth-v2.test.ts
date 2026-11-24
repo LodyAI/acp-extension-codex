@@ -73,6 +73,7 @@ async function connectV2Client(options: {loginSucceeds?: boolean} = {}) {
         switch (method) {
             case "account/read":
                 return {
+                    userId: null,
                     account: loggedIn ? {type: "apiKey"} : null,
                     requiresOpenaiAuth: true,
                 };
@@ -87,7 +88,7 @@ async function connectV2Client(options: {loginSucceeds?: boolean} = {}) {
                 return {type: "apiKey"};
             case "account/logout":
                 loggedIn = false;
-                pushNotification("account/updated", {authMode: null, planType: null});
+                pushNotification("account/updated", {reason: null, authMode: null, planType: null});
                 return {};
             case "thread/start":
                 return {

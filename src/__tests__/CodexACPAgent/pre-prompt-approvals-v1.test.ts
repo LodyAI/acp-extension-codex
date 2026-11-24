@@ -74,6 +74,7 @@ describe('pre-prompt Codex approval/elicitation requests on ACP v1', () => {
         const client = await connectV1();
 
         const response = await client.triggerApproval('mcpServer/elicitation/request', {
+            environmentId: null,
             threadId: sessionId,
             turnId: null,
             serverName: "test-server",

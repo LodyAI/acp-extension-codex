@@ -116,6 +116,7 @@ describe('tool calls and messages over ACP v2', () => {
         emitDelta("See :codex-file-cita");
         emitDelta("tion{path=\"src/a.ts\" purpose=\"source\"}. Unfinished: :codex-fi");
         client.emit(itemCompleted({
+            moderation: null,
             type: "agentMessage",
             id: "item-agent",
             text: "",
@@ -136,6 +137,7 @@ describe('tool calls and messages over ACP v2', () => {
         await startTurn(client);
 
         const item: ThreadItem = {
+            moderation: null,
             type: "agentMessage",
             id: "call-question",
             text: "Which environment?\n- Staging\n- Production",

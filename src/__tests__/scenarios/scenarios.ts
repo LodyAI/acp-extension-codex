@@ -71,6 +71,7 @@ function command(overrides: Record<string, unknown>): Record<string, unknown> {
 
 function mcpCall(overrides: Record<string, unknown>): Record<string, unknown> {
     return {
+        environmentId: null,
         type: "mcpToolCall",
         id: "mcp-1",
         server: "docs",
@@ -490,6 +491,7 @@ export const SCENARIOS: Scenario[] = [
         steps: [
             {
                 request: {method: "mcpServer/elicitation/request", params: {
+                    environmentId: null,
                     threadId: SESSION_ID, turnId: TURN_ID, serverName: "docs", mode: "form", _meta: null,
                     message: "Pick a color",
                     requestedSchema: {
@@ -508,6 +510,7 @@ export const SCENARIOS: Scenario[] = [
             started(mcpCall({id: "mcp-3", tool: "write"})),
             {
                 request: {method: "mcpServer/elicitation/request", params: {
+                    environmentId: null,
                     threadId: SESSION_ID, turnId: TURN_ID, serverName: "docs", mode: "form",
                     _meta: {codex_approval_kind: "mcp_tool_call", persist: ["session"]},
                     message: "Allow the docs server to run write?",
@@ -526,6 +529,7 @@ export const SCENARIOS: Scenario[] = [
         steps: [
             {
                 request: {method: "mcpServer/elicitation/request", params: {
+                    environmentId: null,
                     threadId: SESSION_ID, turnId: TURN_ID, serverName: "docs", mode: "url", _meta: null,
                     message: "Sign in to the docs server", url: "https://example.com/login", elicitationId: "el-1",
                 }},
@@ -556,12 +560,14 @@ export const SCENARIOS: Scenario[] = [
             notify("item/reasoning/textDelta", {itemId: "rs-1", delta: "raw reasoning", contentIndex: 0}),
             completed({type: "reasoning", id: "rs-1", summary: ["Thinking about it"], content: ["raw reasoning"]}),
             started({
+                moderation: null,
                 type: "agentMessage", id: "msg-1", text: "", phase: "final_answer", memoryCitation: null,
                 delivery: null, questions: null,
             }),
             notify("item/agentMessage/delta", {itemId: "msg-1", delta: "Hello "}),
             notify("item/agentMessage/delta", {itemId: "msg-1", delta: "world"}),
             completed({
+                moderation: null,
                 type: "agentMessage", id: "msg-1", text: "Hello world", phase: "final_answer", memoryCitation: null,
                 delivery: null, questions: null,
             }),
@@ -682,6 +688,7 @@ export const SCENARIOS: Scenario[] = [
             {type: "plan", id: "h-plan", text: "# Plan\n\n1. Ship."},
             {type: "reasoning", id: "h-rs", summary: ["Thought about it"], content: []},
             {
+                moderation: null,
                 type: "agentMessage", id: "h-msg", text: "Done.", phase: null, memoryCitation: null,
                 delivery: null, questions: null,
             },

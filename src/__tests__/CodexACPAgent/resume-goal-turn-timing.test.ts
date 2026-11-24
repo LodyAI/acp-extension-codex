@@ -173,6 +173,7 @@ describe('baseline tracker installed before thread/resume, so an auto-started go
                     content: [{type: "text", text: "Earlier question", text_elements: []}],
                 },
                 {
+                    moderation: null,
                     type: "agentMessage",
                     id: "replayed-reply",
                     text: "Earlier answer",

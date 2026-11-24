@@ -140,6 +140,7 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
         await flush(h);
         expect(await approval("before")).toEqual({decision: "accept"});
         expect(await h.triggerApproval("mcpServer/elicitation/request", {
+            environmentId: null,
             threadId: worker, turnId: "child-turn", serverName: "auth", mode: "url", _meta: null,
             message: "Authorize", url: "https://example.com/authorize", elicitationId: "authorization",
         })).toMatchObject({action: "accept"});
@@ -353,7 +354,7 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
 
     it("replays parent history and empty child associations without inventing a gap or current runtime", async () => {
         await connect();
-        const item: ThreadItem = {type: "agentMessage", id: "parent-answer", text: "Parent history", phase: null,
+        const item: ThreadItem = {moderation: null, type: "agentMessage", id: "parent-answer", text: "Parent history", phase: null,
             memoryCitation: null, delivery: null, questions: null};
         history(h, [activityItem(), item], "foreign-root");
         await load();

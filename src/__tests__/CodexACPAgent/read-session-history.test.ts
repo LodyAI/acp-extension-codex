@@ -142,6 +142,7 @@ function createHistoryThread(): Thread {
                     content: [{type: "text", text: "Hello", text_elements: []}],
                 },
                 {
+                    moderation: null,
                     type: "agentMessage",
                     id: "agent-1",
                     text: "Hi there",

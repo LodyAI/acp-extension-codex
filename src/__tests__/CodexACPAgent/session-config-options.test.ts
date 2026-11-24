@@ -63,7 +63,7 @@ async function createSession(
     const codexAcpClient = fixture.getCodexAcpClient();
 
     vi.spyOn(codexAcpClient, "readAuthRequirement").mockResolvedValue({required: false, account: null});
-    vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
+    vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({userId: null, account: null, requiresOpenaiAuth: false});
     vi.spyOn(codexAcpClient, "newSession").mockResolvedValue({
         sessionId: "session-id",
         currentModelId,
@@ -552,7 +552,7 @@ describe("Session config options", () => {
         const {fast} = buildModels();
 
         vi.spyOn(codexAcpClient, "readAuthRequirement").mockResolvedValue({required: false, account: null});
-        vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({userId: null, account: null, requiresOpenaiAuth: false});
         vi.spyOn(codexAcpClient, "newSession").mockResolvedValue({
             sessionId: "session-id",
             currentModelId: "fast-model[medium]",

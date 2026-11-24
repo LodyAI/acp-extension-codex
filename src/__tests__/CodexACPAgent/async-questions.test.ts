@@ -15,6 +15,7 @@ import {
 } from './v2-prompt-harness';
 
 const questionItem: ThreadItem = {
+    moderation: null,
     type: "agentMessage",
     id: "call-question",
     text: "Which environment?\n- Staging\n- Production\n\nAnything else?",

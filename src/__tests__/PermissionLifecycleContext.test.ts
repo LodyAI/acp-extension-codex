@@ -22,6 +22,7 @@ function mcpStarted(id: string, turnId: string, threadId = "thread"): ServerNoti
             turnId,
             startedAtMs: 0,
             item: {
+                environmentId: null,
                 type: "mcpToolCall",
                 id,
                 server: "server",
@@ -203,6 +204,7 @@ describe("PermissionLifecycleContext", () => {
         );
 
         await handler.handleElicitation({
+            environmentId: null,
             threadId: "thread",
             turnId: "turn-1",
             serverName: "server",
@@ -234,6 +236,7 @@ describe("PermissionLifecycleContext", () => {
             new AcpToolCallRenderer(ClientCapabilities.DEFAULT),
         );
         const approval = {
+            environmentId: null,
             threadId: "thread",
             turnId: "turn-1",
             serverName: "server",

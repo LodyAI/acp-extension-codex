@@ -179,7 +179,7 @@ describe("ACP session close", () => {
             env: [],
         };
         vi.spyOn(codexAcpClient, "readAuthRequirement").mockResolvedValue({required: false, account: null});
-        vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({userId: null, account: null, requiresOpenaiAuth: false});
         vi.spyOn(codexAcpClient, "listSkills").mockResolvedValue({data: []});
         vi.spyOn(codexAcpClient, "newSession").mockResolvedValue({
             sessionId,
@@ -228,11 +228,11 @@ describe("ACP session close", () => {
         };
         fixture.sendServerNotification({
             method: "mcpServer/startupStatus/updated",
-            params: {threadId: sessionId, name: "slow-mcp", status: "starting", error: null, failureReason: null},
+            params: {environmentId: null, threadId: sessionId, name: "slow-mcp", status: "starting", error: null, failureReason: null},
         });
         fixture.sendServerNotification({
             method: "mcpServer/startupStatus/updated",
-            params: {threadId: null, name: "global-mcp", status: "ready", error: null, failureReason: null},
+            params: {environmentId: null, threadId: null, name: "global-mcp", status: "ready", error: null, failureReason: null},
         });
         expect(tracker.waiters).toHaveLength(1);
 
@@ -250,7 +250,7 @@ describe("ACP session close", () => {
         const codexAcpClient = fixture.getCodexAcpClient();
         await codexAcpAgent.initialize({protocolVersion: 1, clientCapabilities: {elicitation: {url: {}}}});
         vi.spyOn(codexAcpClient, "readAuthRequirement").mockResolvedValue({required: false, account: null});
-        vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({userId: null, account: null, requiresOpenaiAuth: false});
         vi.spyOn(codexAcpClient, "listSkills").mockResolvedValue({data: []});
         vi.spyOn(codexAcpClient, "newSession").mockResolvedValue({
             sessionId,
@@ -267,7 +267,7 @@ describe("ACP session close", () => {
 
         fixture.sendServerNotification({
             method: "mcpServer/startupStatus/updated",
-            params: {threadId: sessionId, name: "linear", status: "failed", error: "expired", failureReason: "reauthenticationRequired"},
+            params: {environmentId: null, threadId: sessionId, name: "linear", status: "failed", error: "expired", failureReason: "reauthenticationRequired"},
         });
         await vi.waitFor(() => {
             expect(fixture.getAcpConnectionEvents([]).map(event => event.method).filter(method => method !== "sessionUpdate")).toEqual(["createElicitation"]);
@@ -542,7 +542,7 @@ async function createSession(options: {
     const model = createTestModel();
 
     vi.spyOn(codexAcpClient, "readAuthRequirement").mockResolvedValue({required: false, account: null});
-    vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
+    vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({userId: null, account: null, requiresOpenaiAuth: false});
     vi.spyOn(codexAcpClient, "listSkills").mockResolvedValue({data: []});
     vi.spyOn(codexAcpClient, "newSession").mockResolvedValue({
         sessionId,

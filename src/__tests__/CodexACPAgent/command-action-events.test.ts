@@ -298,6 +298,7 @@ describe('CodexEventHandler - command action events', () => {
                 turnId: 'turn-1',
                 startedAtMs: 0,
                 item: {
+                    environmentId: null,
                     type: "mcpToolCall",
                     id: "call-id",
                     server: "server-name",
@@ -331,6 +332,7 @@ describe('CodexEventHandler - command action events', () => {
                     turnId: 'turn-1',
                     startedAtMs: 0,
                     item: {
+                        environmentId: null,
                         type: "mcpToolCall",
                         id: "call-id",
                         server: "ijproxy",
@@ -363,6 +365,7 @@ describe('CodexEventHandler - command action events', () => {
                     turnId: 'turn-1',
                     completedAtMs: 0,
                     item: {
+                        environmentId: null,
                         type: "mcpToolCall",
                         id: "call-id",
                         server: "ijproxy",
@@ -400,6 +403,7 @@ describe('CodexEventHandler - command action events', () => {
                     turnId: 'turn-1',
                     startedAtMs: 0,
                     item: {
+                        environmentId: null,
                         type: "mcpToolCall",
                         id: "call-id",
                         server: "server-name",
@@ -441,6 +445,7 @@ describe('CodexEventHandler - command action events', () => {
                     turnId: 'turn-1',
                     completedAtMs: 0,
                     item: {
+                        environmentId: null,
                         type: "mcpToolCall",
                         id: "call-id",
                         server: "server-name",

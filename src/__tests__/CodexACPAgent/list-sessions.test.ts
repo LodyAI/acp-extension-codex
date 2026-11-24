@@ -263,6 +263,7 @@ describe("CodexACPAgent - list sessions", () => {
 
         vi.spyOn(codexAcpClient, "readAuthRequirement").mockResolvedValue({required: false, account: null});
         vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({
+            userId: null,
             account: null,
             requiresOpenaiAuth: false,
         });
@@ -277,7 +278,7 @@ describe("CodexACPAgent - list sessions", () => {
                 availabilityNux: null,
                 modelSpecialty: null,
                 multiAgentVersion: null,
-                availableAccessPrograms: {cyber: []},
+                availableAccessPrograms: {daybreakAvailability: "default", cyber: []},
                 displayName: "gpt-5",
                 description: "test model",
                 hidden: false,

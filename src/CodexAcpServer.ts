@@ -4403,7 +4403,7 @@ export class CodexAcpServer {
             case "skill":
                 return [{ type: "text", text: `skill:${input.name} (${input.path})` }];
             case "audio":
-                return [{type: "text", text: this.formatUriAsLink("audio", input.url)}];
+                return [{type: "text", text: "url" in input ? this.formatUriAsLink("audio", input.url) : `audio:${input.fileId}`}];
         }
     }
 

@@ -38,6 +38,7 @@ const read = {
     commandActions: [{type: "read", command: "cat a.txt", name: "a.txt", path: "/w/a.txt"}],
 } as const;
 const mcp = {
+    environmentId: null,
     type: "mcpToolCall", id: "mcp", server: "docs", tool: "search", status: "completed", arguments: {q: "acp"},
     appContext: null, readOnlyHint: null, pluginId: null, durationMs: 1,
     result: {content: [{type: "text", text: "hit"}], structuredContent: {hits: 1}, _meta: null}, error: null,
@@ -148,6 +149,7 @@ describe("ACP tool call contract", () => {
 
     it("shows the question of a standalone elicitation only once for AIR", () => {
         const facts = ElicitationReporter.permission({
+            environmentId: null,
             threadId: "s", turnId: "t", serverName: "srv", mode: "form", _meta: null,
             message: "Pick a value", requestedSchema: {type: "object", properties: {}},
         } as never, false, undefined, () => "ask");
@@ -159,6 +161,7 @@ describe("ACP tool call contract", () => {
 
     it("sends kind execute in the approval request of a started MCP tool call to every client", () => {
         const facts = ElicitationReporter.permission({
+            environmentId: null,
             threadId: "s", turnId: "t", serverName: "srv", mode: "form", _meta: null,
             message: "Allow the tool?", requestedSchema: {type: "object", properties: {}},
         } as never, true, "mcp-1", () => "unused");

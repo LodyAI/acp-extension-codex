@@ -41,7 +41,7 @@ function startupStatus(
 ) {
     return {
         method: "mcpServer/startupStatus/updated",
-        params: {threadId, name, status, error, failureReason},
+        params: {environmentId: null, threadId, name, status, error, failureReason},
     };
 }
 

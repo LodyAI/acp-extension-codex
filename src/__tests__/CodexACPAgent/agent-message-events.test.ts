@@ -33,6 +33,7 @@ describe("CodexEventHandler - agent message events", () => {
                     turnId: "turn-1",
                     startedAtMs: 0,
                     item: {
+                        moderation: null,
                         type: "agentMessage",
                         id: "commentary-message",
                         text: "",
@@ -59,6 +60,7 @@ describe("CodexEventHandler - agent message events", () => {
                     turnId: "turn-1",
                     startedAtMs: 10,
                     item: {
+                        moderation: null,
                         type: "agentMessage",
                         id: "final-message",
                         text: "",
@@ -105,6 +107,7 @@ describe("CodexEventHandler - agent message events", () => {
                     turnId: "turn-1",
                     completedAtMs: 10,
                     item: {
+                        moderation: null,
                         type: "agentMessage",
                         id: "final-message",
                         text: "",
@@ -126,6 +129,7 @@ describe("CodexEventHandler - agent message events", () => {
 
     it("sends an agent message that arrives whole, without deltas", async () => {
         const item = {
+            moderation: null,
             type: "agentMessage" as const,
             id: "call-question",
             text: "Which environment? See :codex-file-citation{path=\"docs/envs.md\"}\n- Staging\n- Production",
