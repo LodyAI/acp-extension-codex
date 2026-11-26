@@ -42,6 +42,8 @@ export function startCodexConnection(
     const spawnEnv = {...(env ?? process.env)};
     const processToken = spawnEnv['LODY_CODEX_PROCESS_TOKEN'];
     delete spawnEnv['LODY_CODEX_PROCESS_TOKEN'];
+    // The native app server passes its environment to project commands.
+    if (codexPath) delete spawnEnv['ELECTRON_RUN_AS_NODE'];
     const spawnOptions = {env: spawnEnv, windowsHide: true};
     const managedConfig = spawnEnv['LODY_CODEX_PROFILE_CONFIG'];
     const args = managedConfig ? profileStartupArgs(JSON.parse(managedConfig)) : [];
